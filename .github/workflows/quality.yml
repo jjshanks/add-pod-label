@@ -1,0 +1,43 @@
+name: Quality
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: Check for yaml errors
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          file_or_dir: manifests/
+          config_file: .yamllint.yml
+
+      - name: Install Kubeconform
+        run: |
+          curl -Lo kubeconform.tar.gz https://github.com/yannh/kubeconform/releases/download/v0.6.3/kubeconform-linux-amd64.tar.gz
+          tar xf kubeconform.tar.gz
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Run Kubeconform
+        run: |
+          kubeconform \
+            -kubernetes-version 1.27.0 \
+            -ignore-missing-schemas \
+            -summary \
+            manifests/*.yaml

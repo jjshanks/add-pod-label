@@ -1,0 +1,144 @@
+name: Go
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  verify:
+    name: Verify and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+          cache: true
+      
+      - name: Install tools
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+          go install mvdan.cc/gofumpt@latest
+      
+      - name: Verify formatting
+        id: fmt
+        run: |
+          find . -name '*.go' -type f -print0 | xargs -0 gofumpt -l > fmt.out
+          if [ -s fmt.out ]; then
+            echo "Some files need formatting"
+            echo "needs_formatting=true" >> $GITHUB_OUTPUT
+            find . -name '*.go' -type f -print0 | xargs -0 gofumpt -w
+          else
+            echo "No files need formatting"
+            echo "needs_formatting=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Verify imports
+        id: imports
+        run: |
+          find . -name '*.go' -type f -print0 | xargs -0 goimports -l > imports.out
+          if [ -s imports.out ]; then
+            echo "Some files need import organization"
+            echo "needs_organization=true" >> $GITHUB_OUTPUT
+            find . -name '*.go' -type f -print0 | xargs -0 goimports -w
+          else
+            echo "No files need import organization"
+            echo "needs_organization=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit changes if needed
+        if: steps.fmt.outputs.needs_formatting == 'true' || steps.imports.outputs.needs_organization == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .
+          git commit -m "auto: format Go code"
+          git push
+      
+      - name: Run go vet
+        run: go vet ./...
+      
+      - name: Run unit tests and coverage
+        run: |
+          make test-unit
+          make test-coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: coverage.html
+          retention-days: 7
+
+  integration-test:
+    name: Run Integration Tests
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    needs: verify
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Install Kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x ./kubectl
+          sudo mv ./kubectl /usr/local/bin/kubectl
+      
+      - name: Run integration tests
+        run: |
+          make test-integration-debug
+
+  notify:
+    name: Notify on Failure
+    needs: [verify, integration-test]
+    runs-on: ubuntu-latest
+    if: failure()
+    
+    steps:
+      - name: Determine test type
+        id: test-type
+        run: |
+          if [[ "${{ github.actor }}" == "dependabot[bot]" ]]; then
+            echo "message=Verification, unit tests, or integration tests failed" >> $GITHUB_OUTPUT
+          else
+            echo "message=Verification or unit tests failed" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const { owner, repo, number } = context.issue;
+            github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: number,
+              body: `❌ ${{ steps.test-type.outputs.message }}. Please check the workflow logs for details.`
+            });

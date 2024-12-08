@@ -1,0 +1,43 @@
+# manifests/deployment.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pod-label-webhook
+  namespace: pod-label-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pod-label-webhook
+  template:
+    metadata:
+      labels:
+        app: pod-label-webhook
+    spec:
+      containers:
+      - name: webhook
+        image: pod-label-webhook:latest
+        imagePullPolicy: Never  # Added this line for local images
+        ports:
+        - containerPort: 8443
+        volumeMounts:
+        - name: cert
+          mountPath: /etc/webhook/certs
+          readOnly: true
+      volumes:
+      - name: cert
+        secret:
+          secretName: pod-label-webhook-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pod-label-webhook
+  namespace: pod-label-system
+spec:
+  ports:
+  - port: 443
+    targetPort: 8443
+  selector:
+    app: pod-label-webhook

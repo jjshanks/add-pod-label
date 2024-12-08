@@ -1,0 +1,57 @@
+# manifests/webhook.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pod-label-system
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: pod-label-webhook-cert
+  namespace: pod-label-system
+spec:
+  dnsNames:
+  - pod-label-webhook.pod-label-system.svc
+  - pod-label-webhook.pod-label-system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: pod-label-selfsigned-issuer
+  secretName: pod-label-webhook-cert
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: pod-label-selfsigned-issuer
+  namespace: pod-label-system
+spec:
+  selfSigned: {}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: pod-label-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: pod-label-system/pod-label-webhook-cert
+webhooks:
+- name: pod-label.example.com
+  clientConfig:
+    service:
+      name: pod-label-webhook
+      namespace: pod-label-system
+      path: "/mutate"
+  rules:
+  - apiGroups: [""]
+    apiVersions: ["v1"]
+    operations: ["CREATE"]
+    resources: ["pods"]
+  admissionReviewVersions: ["v1"]
+  sideEffects: None
+  failurePolicy: Fail
+  timeoutSeconds: 5
+  namespaceSelector:
+    matchExpressions:
+    - key: kubernetes.io/metadata.name
+      operator: NotIn
+      values: ["kube-system", "cert-manager", "pod-label-system"]
+  objectSelector: {}
