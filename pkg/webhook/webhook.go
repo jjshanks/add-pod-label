@@ -189,6 +189,14 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func isValidPath(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
+}
+
 func Run() error {
 	// Validate and resolve certificate paths
 	certPath, err := validateAndResolvePath(certDir, certFile)
@@ -202,6 +210,13 @@ func Run() error {
 	}
 
 	// Read and validate certificates
+	if !isValidPath(certPath) {
+		return fmt.Errorf("invalid certificate path: %s", certPath)
+	}
+	if !isValidPath(keyPath) {
+		return fmt.Errorf("invalid key path: %s", keyPath)
+	}
+
 	if _, err := os.ReadFile(certPath); err != nil {
 		return fmt.Errorf("failed to read certificate file: %v", err)
 	}
