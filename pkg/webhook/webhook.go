@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -22,14 +23,44 @@ var (
 	codecs        = serializer.NewCodecFactory(runtimeScheme)
 	deserializer  = codecs.UniversalDeserializer()
 
-	certFile = filepath.Join("/etc/webhook/certs", "tls.crt")
-	keyFile  = filepath.Join("/etc/webhook/certs", "tls.key")
+	// Define the base directory for certificates
+	certDir  = "/etc/webhook/certs"
+	certFile = "tls.crt"
+	keyFile  = "tls.key"
 )
 
 func init() {
 	_ = corev1.AddToScheme(runtimeScheme)
 	_ = admissionv1.AddToScheme(runtimeScheme)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.LUTC | log.Lshortfile)
+}
+
+func validateAndResolvePath(base, file string) (string, error) {
+	// Clean the paths
+	base = filepath.Clean(base)
+	file = filepath.Clean(file)
+
+	// Check if file contains any directory traversal attempts
+	if strings.Contains(file, "..") {
+		return "", fmt.Errorf("invalid file path: directory traversal detected")
+	}
+
+	// Join paths and verify it's still under base directory
+	fullPath := filepath.Join(base, file)
+	if !strings.HasPrefix(fullPath, base) {
+		return "", fmt.Errorf("invalid file path: outside of base directory")
+	}
+
+	// Verify the file exists and is a regular file
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("error accessing file: %v", err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("path is a directory, expected a file")
+	}
+
+	return fullPath, nil
 }
 
 type patchOperation struct {
@@ -159,11 +190,22 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 }
 
 func Run() error {
-	// Certificate checks using os package
-	if _, err := os.ReadFile(certFile); err != nil {
+	// Validate and resolve certificate paths
+	certPath, err := validateAndResolvePath(certDir, certFile)
+	if err != nil {
+		return fmt.Errorf("invalid certificate file: %v", err)
+	}
+
+	keyPath, err := validateAndResolvePath(certDir, keyFile)
+	if err != nil {
+		return fmt.Errorf("invalid key file: %v", err)
+	}
+
+	// Read and validate certificates
+	if _, err := os.ReadFile(certPath); err != nil {
 		return fmt.Errorf("failed to read certificate file: %v", err)
 	}
-	if _, err := os.ReadFile(keyFile); err != nil {
+	if _, err := os.ReadFile(keyPath); err != nil {
 		return fmt.Errorf("failed to read key file: %v", err)
 	}
 
@@ -180,5 +222,5 @@ func Run() error {
 	}
 
 	log.Printf("Starting webhook server on :8443")
-	return server.ListenAndServeTLS(certFile, keyFile)
+	return server.ListenAndServeTLS(certPath, keyPath)
 }
