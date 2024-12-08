@@ -17,7 +17,7 @@ spec:
   issuerRef:
     kind: Issuer
     name: pod-label-selfsigned-issuer
-  secretName: pod-label-webhook-cert
+    secretName: pod-label-webhook-cert
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer

@@ -20,15 +20,22 @@ spec:
         image: pod-label-webhook:latest
         imagePullPolicy: Never  # Added this line for local images
         ports:
-        - containerPort: 8443
+          - containerPort: 8443
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+          requests:
+            memory: "64Mi"
+            cpu: "250m"
         volumeMounts:
-        - name: cert
-          mountPath: /etc/webhook/certs
-          readOnly: true
+          - name: cert
+            mountPath: /etc/webhook/certs
+            readOnly: true
       volumes:
-      - name: cert
-        secret:
-          secretName: pod-label-webhook-cert
+        - name: cert
+          secret:
+            secretName: pod-label-webhook-cert
 ---
 apiVersion: v1
 kind: Service
@@ -36,6 +43,7 @@ metadata:
   name: pod-label-webhook
   namespace: pod-label-system
 spec:
+  type: ClusterIP
   ports:
   - port: 443
     targetPort: 8443
