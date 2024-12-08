@@ -39,3 +39,12 @@ webhooks:
       service:
         name: pod-label-webhook
         namespace: pod-label-system
+        path: "/mutate"
+      caBundle: ""
+    rules:
+      - operations: ["CREATE", "UPDATE"]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+    sideEffects: None
+    admissionReviewVersions: ["v1", "v1beta1"]
