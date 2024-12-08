@@ -3,10 +3,12 @@ package webhook
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
+	"time"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -68,9 +70,10 @@ func createPatch(pod *corev1.Pod) ([]byte, error) {
 }
 
 func handleMutate(w http.ResponseWriter, r *http.Request) {
-	log.Println("Received request")
+	log.Printf("Received request")
 
-	body, err := ioutil.ReadAll(r.Body)
+	// Read request body
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("Error reading body: %v", err)
 		http.Error(w, "error reading body", http.StatusBadRequest)
@@ -156,12 +159,24 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 }
 
 func Run() error {
+	// Certificate checks using os package
+	if _, err := os.ReadFile(certFile); err != nil {
+		return fmt.Errorf("failed to read certificate file: %v", err)
+	}
+	if _, err := os.ReadFile(keyFile); err != nil {
+		return fmt.Errorf("failed to read key file: %v", err)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mutate", handleMutate)
 
 	server := &http.Server{
-		Addr:    ":8443",
-		Handler: mux,
+		Addr:              ":8443",
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	log.Printf("Starting webhook server on :8443")
