@@ -7,8 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -23,44 +21,17 @@ var (
 	codecs        = serializer.NewCodecFactory(runtimeScheme)
 	deserializer  = codecs.UniversalDeserializer()
 
-	// Define the base directory for certificates
-	certDir  = "/etc/webhook/certs"
-	certFile = "tls.crt"
-	keyFile  = "tls.key"
+	// Define a strict allowlist of valid certificate paths
+	allowedCertPaths = map[string]bool{
+		"/etc/webhook/certs/tls.crt": true,
+		"/etc/webhook/certs/tls.key": true,
+	}
 )
 
 func init() {
 	_ = corev1.AddToScheme(runtimeScheme)
 	_ = admissionv1.AddToScheme(runtimeScheme)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.LUTC | log.Lshortfile)
-}
-
-func validateAndResolvePath(base, file string) (string, error) {
-	// Clean the paths
-	base = filepath.Clean(base)
-	file = filepath.Clean(file)
-
-	// Check if file contains any directory traversal attempts
-	if strings.Contains(file, "..") {
-		return "", fmt.Errorf("invalid file path: directory traversal detected")
-	}
-
-	// Join paths and verify it's still under base directory
-	fullPath := filepath.Join(base, file)
-	if !strings.HasPrefix(fullPath, base) {
-		return "", fmt.Errorf("invalid file path: outside of base directory")
-	}
-
-	// Verify the file exists and is a regular file
-	info, err := os.Stat(fullPath)
-	if err != nil {
-		return "", fmt.Errorf("error accessing file: %v", err)
-	}
-	if info.IsDir() {
-		return "", fmt.Errorf("path is a directory, expected a file")
-	}
-
-	return fullPath, nil
 }
 
 type patchOperation struct {
@@ -103,7 +74,6 @@ func createPatch(pod *corev1.Pod) ([]byte, error) {
 func handleMutate(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Received request")
 
-	// Read request body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("Error reading body: %v", err)
@@ -111,14 +81,12 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify content type
 	if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
 		log.Printf("Wrong content type: %s", contentType)
 		http.Error(w, "invalid Content-Type, expected 'application/json'", http.StatusUnsupportedMediaType)
 		return
 	}
 
-	// Parse the AdmissionReview
 	admissionReview := &admissionv1.AdmissionReview{}
 	if _, _, err := deserializer.Decode(body, nil, admissionReview); err != nil {
 		log.Printf("Error decoding admission review: %v", err)
@@ -126,7 +94,6 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ensure we have a request
 	request := admissionReview.Request
 	if request == nil {
 		log.Printf("Admission review request is nil")
@@ -136,7 +103,6 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Processing request for UID: %s", request.UID)
 
-	// Parse the Pod
 	pod := &corev1.Pod{}
 	if err := json.Unmarshal(request.Object.Raw, pod); err != nil {
 		log.Printf("Error unmarshaling pod: %v", err)
@@ -153,7 +119,6 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Created patch: %s", string(patchBytes))
 
-	// Create the admission response
 	patchType := admissionv1.PatchTypeJSONPatch
 	admissionResponse := &admissionv1.AdmissionResponse{
 		UID:       request.UID,
@@ -162,7 +127,6 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 		PatchType: &patchType,
 	}
 
-	// Create the admission review response
 	response := &admissionv1.AdmissionReview{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "admission.k8s.io/v1",
@@ -189,45 +153,18 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func isValidPath(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return !info.IsDir()
-}
-
 func Run() error {
-	// Use filepath.Join for path construction and clean the paths
-	certPath := filepath.Clean(filepath.Join(certDir, certFile))
-	keyPath := filepath.Clean(filepath.Join(certDir, keyFile))
+	certPath := "/etc/webhook/certs/tls.crt"
+	keyPath := "/etc/webhook/certs/tls.key"
 
-	// Convert to absolute paths
-	certAbsPath, err := filepath.Abs(certPath)
-	if err != nil {
-		return fmt.Errorf("failed to resolve certificate path: %v", err)
+	if !allowedCertPaths[certPath] {
+		return fmt.Errorf("certificate path not in allowlist: %s", certPath)
 	}
-	keyAbsPath, err := filepath.Abs(keyPath)
-	if err != nil {
-		return fmt.Errorf("failed to resolve key path: %v", err)
+	if !allowedCertPaths[keyPath] {
+		return fmt.Errorf("key path not in allowlist: %s", keyPath)
 	}
 
-	// Validate paths are within allowed directory
-	certDirAbs, err := filepath.Abs(certDir)
-	if err != nil {
-		return fmt.Errorf("failed to resolve certificate directory: %v", err)
-	}
-
-	// Check if paths are within allowed directory
-	if !strings.HasPrefix(certAbsPath, certDirAbs) {
-		return fmt.Errorf("certificate path is outside of allowed directory")
-	}
-	if !strings.HasPrefix(keyAbsPath, certDirAbs) {
-		return fmt.Errorf("key path is outside of allowed directory")
-	}
-
-	// Stat the files to check they exist and are regular files
-	certInfo, err := os.Stat(certAbsPath)
+	certInfo, err := os.Stat(certPath)
 	if err != nil {
 		return fmt.Errorf("certificate file error: %v", err)
 	}
@@ -235,20 +172,12 @@ func Run() error {
 		return fmt.Errorf("certificate path is not a regular file")
 	}
 
-	keyInfo, err := os.Stat(keyAbsPath)
+	keyInfo, err := os.Stat(keyPath)
 	if err != nil {
 		return fmt.Errorf("key file error: %v", err)
 	}
 	if !keyInfo.Mode().IsRegular() {
 		return fmt.Errorf("key path is not a regular file")
-	}
-
-	// Read files after validation
-	if _, err := os.ReadFile(certAbsPath); err != nil {
-		return fmt.Errorf("failed to read certificate file: %v", err)
-	}
-	if _, err := os.ReadFile(keyAbsPath); err != nil {
-		return fmt.Errorf("failed to read key file: %v", err)
 	}
 
 	mux := http.NewServeMux()
@@ -264,5 +193,5 @@ func Run() error {
 	}
 
 	log.Printf("Starting webhook server on :8443")
-	return server.ListenAndServeTLS(certAbsPath, keyAbsPath)
+	return server.ListenAndServeTLS(certPath, keyPath)
 }
