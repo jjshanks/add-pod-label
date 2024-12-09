@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [ main ]
   schedule:
-    - cron: '0 0 * * 0'  # Weekly on Sundays
+    - cron: '0 0 * * 0' # Weekly on Sundays
 
 permissions:
   contents: read
@@ -29,12 +29,26 @@ jobs:
         with:
           sarif_file: results.sarif
 
+      - name: Build Docker image
+        run: docker build -t pod-label-webhook:latest .
+
       - name: Container Scan
         uses: anchore/scan-action@v3
         with:
           image: "pod-label-webhook:latest"
           fail-build: false
           severity-cutoff: high
+          # Add dockerfile path to help scanner
+          dockerfile-path: "./Dockerfile"
+          # Create output directory with proper permissions
+          acs-report-enable: true
+          output-format: sarif
+
+      - name: Upload Anchore scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()  # This ensures results are uploaded even if scan fails
+        with:
+          sarif_file: anchore-results.sarif
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
