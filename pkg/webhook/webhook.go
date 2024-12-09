@@ -198,29 +198,56 @@ func isValidPath(path string) bool {
 }
 
 func Run() error {
-	// Validate and resolve certificate paths
-	certPath, err := validateAndResolvePath(certDir, certFile)
+	// Use filepath.Join for path construction and clean the paths
+	certPath := filepath.Clean(filepath.Join(certDir, certFile))
+	keyPath := filepath.Clean(filepath.Join(certDir, keyFile))
+
+	// Convert to absolute paths
+	certAbsPath, err := filepath.Abs(certPath)
 	if err != nil {
-		return fmt.Errorf("invalid certificate file: %v", err)
+		return fmt.Errorf("failed to resolve certificate path: %v", err)
 	}
-
-	keyPath, err := validateAndResolvePath(certDir, keyFile)
+	keyAbsPath, err := filepath.Abs(keyPath)
 	if err != nil {
-		return fmt.Errorf("invalid key file: %v", err)
+		return fmt.Errorf("failed to resolve key path: %v", err)
 	}
 
-	// Read and validate certificates
-	if !isValidPath(certPath) {
-		return fmt.Errorf("invalid certificate path: %s", certPath)
-	}
-	if !isValidPath(keyPath) {
-		return fmt.Errorf("invalid key path: %s", keyPath)
+	// Validate paths are within allowed directory
+	certDirAbs, err := filepath.Abs(certDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve certificate directory: %v", err)
 	}
 
-	if _, err := os.ReadFile(certPath); err != nil {
+	// Check if paths are within allowed directory
+	if !strings.HasPrefix(certAbsPath, certDirAbs) {
+		return fmt.Errorf("certificate path is outside of allowed directory")
+	}
+	if !strings.HasPrefix(keyAbsPath, certDirAbs) {
+		return fmt.Errorf("key path is outside of allowed directory")
+	}
+
+	// Stat the files to check they exist and are regular files
+	certInfo, err := os.Stat(certAbsPath)
+	if err != nil {
+		return fmt.Errorf("certificate file error: %v", err)
+	}
+	if !certInfo.Mode().IsRegular() {
+		return fmt.Errorf("certificate path is not a regular file")
+	}
+
+	keyInfo, err := os.Stat(keyAbsPath)
+	if err != nil {
+		return fmt.Errorf("key file error: %v", err)
+	}
+	if !keyInfo.Mode().IsRegular() {
+		return fmt.Errorf("key path is not a regular file")
+	}
+
+	// Read files after validation
+	if _, err := os.ReadFile(certAbsPath); err != nil {
 		return fmt.Errorf("failed to read certificate file: %v", err)
 	}
-	if _, err := os.ReadFile(keyPath); err != nil {
+	if _, err := os.ReadFile(keyAbsPath); err != nil {
 		return fmt.Errorf("failed to read key file: %v", err)
 	}
 
@@ -237,5 +264,5 @@ func Run() error {
 	}
 
 	log.Printf("Starting webhook server on :8443")
-	return server.ListenAndServeTLS(certPath, keyPath)
+	return server.ListenAndServeTLS(certAbsPath, keyAbsPath)
 }
