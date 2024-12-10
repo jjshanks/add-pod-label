@@ -98,7 +98,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v2
         if: always()
         with:
-          sarif_file: sarif-output.json
+          sarif_file: scan-results/anchore.sarif
           category: AnchoreContainerScan
 
       - name: Post scan summary
