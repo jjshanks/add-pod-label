@@ -23,16 +23,22 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Create directory for scan results
+      - name: Create results directory
+        run: |
+          mkdir -p scan-results
+          chmod 777 scan-results
+
       - name: Run Gosec
         uses: securego/gosec@master
         with:
-          args: '-no-fail -fmt sarif -out results.sarif ./...'
+          args: '-no-fail -fmt sarif -out scan-results/gosec.sarif ./...'
 
       - name: Upload Gosec results
         uses: github/codeql-action/upload-sarif@v2
         if: always()
         with:
-          sarif_file: results.sarif
+          sarif_file: scan-results/gosec.sarif
           category: GosecScan
 
       - name: Set up Docker Buildx
@@ -53,7 +59,7 @@ jobs:
           scan-type: 'fs'
           ignore-unfixed: true
           format: 'sarif'
-          output: 'trivy-fs.sarif'
+          output: 'scan-results/trivy-fs.sarif'
           severity: 'CRITICAL,HIGH'
           timeout: '10m'
 
@@ -62,7 +68,7 @@ jobs:
         with:
           image-ref: 'pod-label-webhook:latest'
           format: 'sarif'
-          output: 'trivy-image.sarif'
+          output: 'scan-results/trivy-image.sarif'
           severity: 'CRITICAL,HIGH'
           timeout: '10m'
 
@@ -70,7 +76,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v2
         if: always()
         with:
-          sarif_file: 'trivy-*.sarif'
+          sarif_file: scan-results/trivy-*.sarif
           category: TrivyScan
 
       - name: Run container scan
@@ -80,19 +86,40 @@ jobs:
           image: "pod-label-webhook:latest" 
           fail-build: false
           severity-cutoff: high
+          output-format: sarif
+          output-file: scan-results/anchore.sarif
 
       - name: Upload Anchore scan results 
         uses: github/codeql-action/upload-sarif@v2
         if: always()
         with:
-          sarif_file: results.sarif
+          sarif_file: scan-results/anchore.sarif
           category: AnchoreContainerScan
 
       - name: Post scan summary
         if: always()
         run: |
           echo "### Security Scan Summary" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Gosec scan completed" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Trivy filesystem scan completed" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Trivy container scan completed" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Anchore container scan completed" >> $GITHUB_STEP_SUMMARY
+          echo "| Scanner | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          
+          # Check Gosec results
+          if [ -f "scan-results/gosec.sarif" ]; then
+            echo "| Gosec | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Gosec | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Check Trivy results
+          if [ -f "scan-results/trivy-fs.sarif" ] && [ -f "scan-results/trivy-image.sarif" ]; then
+            echo "| Trivy | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Trivy | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Check Anchore results
+          if [ -f "scan-results/anchore.sarif" ]; then
+            echo "| Anchore | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Anchore | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
