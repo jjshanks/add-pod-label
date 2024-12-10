@@ -1,0 +1,136 @@
+name: Security
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * 0' # Weekly on Sundays
+
+permissions:
+  contents: read
+  security-events: write # Required for uploading security scan results
+
+jobs:
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create results directory
+        run: |
+          mkdir -p scan-results
+          chmod 777 scan-results
+
+      - name: Run Gosec
+        uses: securego/gosec@master
+        with:
+          args: '-no-fail -fmt sarif -out scan-results/gosec.sarif ./...'
+
+      - name: Upload Gosec results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: scan-results/gosec.sarif
+          category: GosecScan
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: pod-label-webhook:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          ignore-unfixed: true
+          format: 'sarif'
+          output: 'scan-results/trivy-fs.sarif'
+          severity: 'CRITICAL,HIGH'
+          timeout: '10m'
+
+      - name: Run Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'pod-label-webhook:latest'
+          format: 'sarif'
+          output: 'scan-results/trivy-image.sarif'
+          severity: 'CRITICAL,HIGH'
+          timeout: '10m'
+
+      - name: Upload Trivy filesystem results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: scan-results/trivy-fs.sarif
+          category: TrivyFSScan
+
+      - name: Upload Trivy image results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: scan-results/trivy-image.sarif
+          category: TrivyImageScan
+
+      - name: Run container scan
+        uses: anchore/scan-action@v3
+        id: scan
+        if: always()
+        with:
+          image: "pod-label-webhook:latest" 
+          fail-build: false
+          severity-cutoff: high
+          output-format: "sarif"
+
+      - name: Upload Anchore scan results 
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+
+      - name: Post scan summary
+        if: always()
+        run: |
+          echo "### Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Scanner | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          
+          # Check Gosec results
+          if [ -f "scan-results/gosec.sarif" ]; then
+            echo "| Gosec | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Gosec | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Check Trivy results
+          if [ -f "scan-results/trivy-fs.sarif" ]; then
+            echo "| Trivy Filesystem | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Trivy Filesystem | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f "scan-results/trivy-image.sarif" ]; then
+            echo "| Trivy Image | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Trivy Image | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Check Anchore results
+          if [ -f "scan-results/anchore.sarif" ]; then
+            echo "| Anchore | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Anchore | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi

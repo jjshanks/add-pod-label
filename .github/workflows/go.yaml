@@ -1,0 +1,145 @@
+name: Go
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+
+permissions: # Explicitly define minimum required permissions
+  contents: read
+  pull-requests: write
+
+jobs:
+  verify:
+    name: Verify and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+          cache: true
+      
+      - name: Install tools
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+          go install mvdan.cc/gofumpt@latest
+      
+      - name: Verify formatting and imports
+        id: verify
+        run: |
+          # Run format check
+          NEEDS_FORMAT=false
+          find . -name '*.go' -type f -print0 | xargs -0 gofumpt -l > fmt.out
+          if [ -s fmt.out ]; then
+            echo "Some files need formatting"
+            NEEDS_FORMAT=true
+            find . -name '*.go' -type f -print0 | xargs -0 gofumpt -w
+          fi
+          echo "needs_formatting=$NEEDS_FORMAT" >> $GITHUB_OUTPUT
+
+          # Run imports check
+          NEEDS_IMPORTS=false
+          find . -name '*.go' -type f -print0 | xargs -0 goimports -l > imports.out
+          if [ -s imports.out ]; then
+            echo "Some files need import organization"
+            NEEDS_IMPORTS=true
+            find . -name '*.go' -type f -print0 | xargs -0 goimports -w
+          fi
+          echo "needs_organization=$NEEDS_IMPORTS" >> $GITHUB_OUTPUT
+
+      - name: Commit changes if needed
+        if: steps.verify.outputs.needs_formatting == 'true' || steps.verify.outputs.needs_organization == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .
+          git commit -m "chore: format Go code"
+          git push
+          
+      - name: Run go vet
+        run: go vet ./...
+      
+      - name: Run tests with coverage
+        run: |
+          go test -v -race -coverprofile=coverage.out ./...
+          go tool cover -html=coverage.out -o coverage.html
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always() # Upload coverage even if tests fail
+        with:
+          name: coverage-report
+          path: coverage.html
+          retention-days: 7
+          if-no-files-found: error
+
+  integration-test:
+    name: Integration Tests 
+    runs-on: ubuntu-latest
+    needs: verify
+    if: |
+      github.actor == 'dependabot[bot]' ||
+      contains(github.event.pull_request.labels.*.name, 'integration-test')
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Set up test environment
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x ./kubectl
+          sudo mv ./kubectl /usr/local/bin/kubectl
+      
+      - name: Run integration tests
+        run: make test-integration-debug
+        timeout-minutes: 15
+
+  notify-failure:
+    name: Notify on Failure
+    needs: [verify, integration-test]
+    runs-on: ubuntu-latest
+    if: failure()
+    
+    steps:
+      - name: Determine test scope
+        id: test-scope
+        run: |
+          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'integration-test') || github.actor == 'dependabot[bot]' }}" == "true" ]]; then
+            echo "scope=verification, unit tests, and integration tests" >> $GITHUB_OUTPUT
+          else  
+            echo "scope=verification and unit tests" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create failure comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const { owner, repo, number } = context.issue;
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: number,
+              body: `❌ The following checks failed: ${{ steps.test-scope.outputs.scope }}. Please check the workflow logs for details.`
+            });

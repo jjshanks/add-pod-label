@@ -1,0 +1,64 @@
+name: Quality
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+
+permissions:
+  contents: read
+  security-events: write # Required for uploading code scanning results
+  
+jobs:
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          args: --timeout=5m
+          only-new-issues: true
+
+      - name: YAML lint
+        uses: ibiqlik/action-yamllint@v3.1 
+        with:
+          file_or_dir: manifests/
+          config_file: .yamllint.yml
+          strict: true
+
+      - name: Set up Kubeconform
+        run: |
+          KUBECONFORM_VERSION="v0.6.3"
+          curl -Lo kubeconform.tar.gz "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "Downloading Kubeconform ${KUBECONFORM_VERSION}..."
+          tar xf kubeconform.tar.gz
+          sudo mv kubeconform /usr/local/bin/
+          rm kubeconform.tar.gz
+
+      - name: Validate Kubernetes manifests
+        run: |
+          echo "Running Kubeconform validation..."
+          kubeconform \
+            -kubernetes-version 1.27.0 \
+            -ignore-missing-schemas \
+            -summary \
+            -strict \
+            -verbose \
+            manifests/*.yaml
