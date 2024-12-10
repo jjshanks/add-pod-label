@@ -1,72 +1,120 @@
-name: Release
+name: Manual Release
 
 on:
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., v1.2.3, v1.2.3-beta.1, v1.2.3+meta.4)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Is this a prerelease?'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
-  contents: write # Required for creating releases
-  packages: write # Required for pushing to GHCR
+  contents: write
+  packages: write
 
 jobs:
-  goreleaser:
-    name: Release
+  create-release:
+    name: Create Release
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Required for GoReleaser to generate changelogs
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-          cache: true
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          platforms: linux/amd64,linux/arm64
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: latest
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check version format
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
           
-      - name: Update release notes
-        if: success()
+          # Check if version starts with 'v'
+          if [[ ! "$VERSION" =~ ^v ]]; then
+            echo "Error: Version must start with 'v'"
+            echo "Examples of valid versions:"
+            echo "  - v1.2.3 (release)"
+            echo "  - v1.2.3-alpha (pre-release)"
+            echo "  - v1.2.3-alpha.1 (pre-release with number)"
+            echo "  - v1.2.3-beta.2+meta.4 (pre-release with build metadata)"
+            echo "  - v1.2.3+meta (release with build metadata)"
+            exit 1
+          fi
+          
+          # Remove 'v' prefix for semver validation
+          VERSION_WITHOUT_V="${VERSION#v}"
+          
+          # Semver regex that supports pre-release and build metadata
+          SEMVER_REGEX="^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+([0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*))?$"
+          if ! echo "$VERSION_WITHOUT_V" | grep -E "$SEMVER_REGEX"; then
+            echo "Error: Version must be a valid semantic version"
+            echo "Examples of valid versions:"
+            echo "  - v1.2.3 (release)"
+            echo "  - v1.2.3-alpha (pre-release)"
+            echo "  - v1.2.3-alpha.1 (pre-release with number)"
+            echo "  - v1.2.3-beta.2+meta.4 (pre-release with build metadata)"
+            echo "  - v1.2.3+meta (release with build metadata)"
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push tag
+        run: |
+          TAG="${{ github.event.inputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists!"
+            exit 1
+          fi
+          git tag $TAG
+          git push origin $TAG
+          sleep 10  # Give GitHub a moment to process the tag
+
+      - name: Trigger and monitor release workflow
         uses: actions/github-script@v7
         with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const tag = context.ref.replace('refs/tags/', '');
-            const release = await github.rest.repos.getReleaseByTag({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag: tag
-            });
+            const tag = `${{ github.event.inputs.version }}`;
             
-            const releaseNotes = `## ${tag}\n\n${release.data.body}\n\n---\n\nFor installation instructions and documentation, please visit our [documentation](docs/README.md).`;
+            async function waitForWorkflow() {
+              for (let i = 0; i < 30; i++) {  // Wait up to 5 minutes
+                console.log('Checking for release workflow run...');
+                
+                const runs = await github.rest.actions.listWorkflowRuns({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'release.yml',  // Your release workflow filename
+                  branch: tag
+                });
+                
+                if (runs.data.workflow_runs.length > 0) {
+                  const run = runs.data.workflow_runs[0];
+                  if (run.status === 'completed') {
+                    if (run.conclusion === 'success') {
+                      console.log('Release workflow completed successfully!');
+                      return true;
+                    } else {
+                      throw new Error(`Release workflow failed with conclusion: ${run.conclusion}`);
+                    }
+                  }
+                  console.log(`Release workflow status: ${run.status}`);
+                } else {
+                  console.log('Release workflow not found yet...');
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 10000));  // Wait 10 seconds
+              }
+              throw new Error('Timeout waiting for release workflow');
+            }
             
-            await github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: release.data.id,
-              body: releaseNotes
-            });
+            try {
+              await waitForWorkflow();
+            } catch (error) {
+              core.setFailed(`Error: ${error.message}`);
+            }
