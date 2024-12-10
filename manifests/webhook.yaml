@@ -50,6 +50,6 @@ webhooks:
     admissionReviewVersions: ["v1", "v1beta1"]
     namespaceSelector:
       matchExpressions:
-      - key: kubernetes.io/metadata.name
-        operator: NotIn
-        values: ["kube-system", "cert-manager", "pod-label-system"]
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kube-system", "cert-manager", "pod-label-system"]
