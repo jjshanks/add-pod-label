@@ -34,7 +34,7 @@ jobs:
           args: '-no-fail -fmt sarif -out scan-results/gosec.sarif ./...'
 
       - name: Upload Gosec results
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: scan-results/gosec.sarif
@@ -72,14 +72,14 @@ jobs:
           timeout: '10m'
 
       - name: Upload Trivy filesystem results
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: scan-results/trivy-fs.sarif
           category: TrivyFSScan
 
       - name: Upload Trivy image results
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: scan-results/trivy-image.sarif
@@ -96,7 +96,7 @@ jobs:
           output-format: "sarif"
 
       - name: Upload Anchore scan results 
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
