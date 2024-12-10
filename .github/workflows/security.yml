@@ -86,7 +86,7 @@ jobs:
           category: TrivyImageScan
 
       - name: Run container scan
-        uses: anchore/scan-action@v3
+        uses: anchore/scan-action@v5
         id: scan
         if: always()
         with:
