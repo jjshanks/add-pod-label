@@ -10,12 +10,14 @@ updates:
       kubernetes:
         patterns:
           - "k8s.io*"
+          - "sigs.k8s.io/*"  # Added to catch all k8s-related packages
     commit-message:
       prefix: "deps"
       include: "scope"
     labels:
       - "dependencies"
       - "automerge"
+      - "integration-test"  # Added to trigger integration tests
 
   # GitHub Actions updates
   - package-ecosystem: "github-actions"
@@ -23,6 +25,11 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    groups:
+      actions:
+        patterns:
+          - "actions/*"
+          - "github/*"
     commit-message:
       prefix: "ci"
       include: "scope"
@@ -46,3 +53,4 @@ updates:
     labels:
       - "dependencies"
       - "automerge"
+      - "integration-test"  # Added to trigger integration tests

@@ -82,28 +82,41 @@ make test           # Creates a test pod to verify labeling
 ### GitHub Workflows
 
 #### Main Go Workflow (`go.yml`)
-- Runs on pull requests
-- Formats Go code
-- Runs unit tests
+- Runs on pull requests (excluding documentation changes)
+- Formats Go code and organizes imports
+- Runs Go vet checks
+- Runs unit tests with race detection
 - Generates coverage report
-- Runs integration tests (only on Dependabot PRs)
+- Runs integration tests (on Dependabot PRs or PRs labeled with 'integration-test')
+- Automatically commits code formatting changes
+- Notifies on failures through PR comments
 
-#### Quality Checks (`quality.yml`)
-- golangci-lint for Go code
-- yamllint for YAML validation
-- kubeconform for Kubernetes manifests
+#### Quality Checks (`quality.yml`) 
+- Runs on pull requests (excluding documentation changes)
+- golangci-lint for Go code (only reports new issues)
+- Strict YAML validation with yamllint
+- Kubernetes manifest validation with kubeconform
+- Enforces strict validation modes
 
 #### Security Scanning (`security.yml`)
-- Gosec for Go security issues
-- Container scanning with Anchore
-- Trivy vulnerability scanning
-- Weekly scheduled scans
+- Runs on:
+  - Push to main branch
+  - Pull requests
+  - Weekly scheduled scans (Sundays)
+- Multiple security scanners:
+  - Gosec for Go security issues
+  - Trivy for filesystem and container scanning
+  - Anchore for container security analysis
+- Results uploaded to GitHub Security tab
+- Provides scan summaries in workflow logs
 
 #### Release Automation (`release.yml`)
-- Triggered by version tags
-- Creates GitHub releases
-- Builds and publishes container images
-- Generates changelogs
+- Triggered by semantic version tags (v*.*.*)
+- Creates GitHub releases with automated release notes
+- Builds multi-arch container images (amd64, arm64)
+- Publishes to GitHub Container Registry
+- Automatically updates release documentation
+- Uses GoReleaser for consistent releases
 
 ### Dependabot Configuration
 
@@ -112,9 +125,10 @@ Automatically updates:
 - GitHub Actions
 - Docker base images
 
-Dependencies are checked weekly and grouped by:
-- Kubernetes packages
-- Golang Docker images
+Dependencies are checked weekly and updated via pull requests:
+- Integration tests run automatically on Dependabot PRs
+- Updates are grouped by ecosystem to reduce noise
+- Security updates have higher priority
 
 ### Testing
 
@@ -124,20 +138,23 @@ The project includes several types of tests:
 ```bash
 make test-unit
 ```
-Tests the webhook logic without requiring a cluster.
+Tests the webhook logic with race detection and generates coverage reports.
 
 #### Integration Tests
 ```bash
 make test-integration
 ```
 Creates a test cluster and verifies the entire system works together.
-Note: Only runs automatically on Dependabot PRs.
+Note: Runs automatically on:
+- Dependabot pull requests
+- Pull requests labeled with 'integration-test'
 
 #### Coverage Report
 ```bash
 make test-coverage
 ```
 Generates a test coverage report in HTML format.
+Coverage reports are automatically uploaded as artifacts in GitHub Actions.
 
 ### Common Tasks
 
@@ -184,7 +201,7 @@ namespaceSelector:
 ## Releases
 
 To create a new release:
-1. Create and push a tag:
+1. Create and push a tag following semantic versioning:
 ```bash
 git tag -a v1.0.0 -m "Release v1.0.0"
 git push origin v1.0.0
@@ -192,9 +209,10 @@ git push origin v1.0.0
 
 2. The release workflow will automatically:
 - Create a GitHub release
-- Build and push container images
+- Build and push multi-arch container images
 - Generate release notes
 - Create binary artifacts
+- Update documentation
 
 ## Contributing
 
@@ -203,7 +221,10 @@ git push origin v1.0.0
 3. Add tests for new functionality
 4. Ensure all tests pass: `make test-all`
 5. Ensure code quality checks pass
-6. Submit a pull request
+6. Ensure security scans pass
+7. Submit a pull request
+
+Note: Integration tests will run automatically if you add the 'integration-test' label to your PR.
 
 ## License
 
@@ -266,6 +287,12 @@ I need help with [specific task/issue]. Can you assist with [specific question]?
    - Check system resources
 
 4. GitHub Actions failing:
+   - Check golangci-lint output for new issues
+   - Verify YAML files pass strict validation
+   - Ensure Kubernetes manifests are valid
+   - Review security scan results in GitHub Security tab
    - Check workflow logs for specific errors
    - For dependabot PRs, verify integration tests are passing
    - Ensure all quality checks pass before merging
+   - Address high severity security findings
+   - Verify tag format for releases (v*.*.*)

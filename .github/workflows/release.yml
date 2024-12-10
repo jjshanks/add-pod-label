@@ -3,27 +3,30 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
 
 permissions:
-  contents: write
-  packages: write
+  contents: write # Required for creating releases
+  packages: write # Required for pushing to GHCR
 
 jobs:
   goreleaser:
     name: Release
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Required for GoReleaser to generate changelogs
 
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version: '1.21'
+          cache: true
 
-      - name: Login to GitHub Container Registry
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -35,6 +38,8 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
@@ -43,3 +48,25 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Update release notes
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            const release = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: tag
+            });
+            
+            const releaseNotes = `## ${tag}\n\n${release.data.body}\n\n---\n\nFor installation instructions and documentation, please visit our [documentation](docs/README.md).`;
+            
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.data.id,
+              body: releaseNotes
+            });

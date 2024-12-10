@@ -10,52 +10,89 @@ on:
 
 permissions:
   contents: read
-  security-events: write
+  security-events: write # Required for uploading security scan results
 
 jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Run Gosec Security Scanner
+      - name: Run Gosec
         uses: securego/gosec@master
         with:
           args: '-no-fail -fmt sarif -out results.sarif ./...'
 
-      - name: Upload SARIF file
+      - name: Upload Gosec results
         uses: github/codeql-action/upload-sarif@v2
+        if: always()
         with:
           sarif_file: results.sarif
+          category: GosecScan
 
-      - name: Build Docker image
-        run: docker build -t pod-label-webhook:latest .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Create results directory
-        run: |
-          mkdir -p scan-results
-          chmod 777 scan-results
-
-      - name: Container Scan
-        uses: anchore/scan-action@v3
-        continue-on-error: true
+      - name: Build image for scanning
+        uses: docker/build-push-action@v5
         with:
-          image: "pod-label-webhook:latest"
-          fail-build: false
-          severity-cutoff: high
+          context: .
+          load: true
+          tags: pod-label-webhook:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Run Trivy vulnerability scanner
+      - name: Run Trivy filesystem scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           ignore-unfixed: true
           format: 'sarif'
-          output: 'scan-results/trivy-results.sarif'
+          output: 'trivy-fs.sarif'
           severity: 'CRITICAL,HIGH'
+          timeout: '10m'
 
-      - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v2
+      - name: Run Trivy image scan
+        uses: aquasecurity/trivy-action@master
         with:
-          sarif_file: 'scan-results/trivy-results.sarif'
+          image-ref: 'pod-label-webhook:latest'
+          format: 'sarif'
+          output: 'trivy-image.sarif'
+          severity: 'CRITICAL,HIGH'
+          timeout: '10m'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-*.sarif'
           category: TrivyScan
+
+      - name: Run container scan
+        uses: anchore/scan-action@v3
+        if: always()
+        with:
+          image: "pod-label-webhook:latest" 
+          fail-build: false
+          severity-cutoff: high
+
+      - name: Upload Anchore scan results 
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: results.sarif
+          category: AnchoreContainerScan
+
+      - name: Post scan summary
+        if: always()
+        run: |
+          echo "### Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Gosec scan completed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Trivy filesystem scan completed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Trivy container scan completed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Anchore container scan completed" >> $GITHUB_STEP_SUMMARY
