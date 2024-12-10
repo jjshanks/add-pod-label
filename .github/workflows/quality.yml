@@ -35,6 +35,7 @@ jobs:
           version: latest
           args: --timeout=5m
           only-new-issues: true
+          working-directory: ./pkg
 
       - name: YAML lint
         uses: ibiqlik/action-yamllint@v3.1 
