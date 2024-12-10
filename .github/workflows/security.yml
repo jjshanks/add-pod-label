@@ -23,7 +23,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Create directory for scan results
       - name: Create results directory
         run: |
           mkdir -p scan-results
@@ -72,12 +71,19 @@ jobs:
           severity: 'CRITICAL,HIGH'
           timeout: '10m'
 
-      - name: Upload Trivy results
+      - name: Upload Trivy filesystem results
         uses: github/codeql-action/upload-sarif@v2
         if: always()
         with:
-          sarif_file: scan-results/trivy-*.sarif
-          category: TrivyScan
+          sarif_file: scan-results/trivy-fs.sarif
+          category: TrivyFSScan
+
+      - name: Upload Trivy image results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: scan-results/trivy-image.sarif
+          category: TrivyImageScan
 
       - name: Run container scan
         uses: anchore/scan-action@v3
@@ -86,8 +92,7 @@ jobs:
           image: "pod-label-webhook:latest" 
           fail-build: false
           severity-cutoff: high
-          output-format: sarif
-          output-file: scan-results/anchore.sarif
+          output-format: "sarif"
 
       - name: Upload Anchore scan results 
         uses: github/codeql-action/upload-sarif@v2
@@ -111,10 +116,16 @@ jobs:
           fi
           
           # Check Trivy results
-          if [ -f "scan-results/trivy-fs.sarif" ] && [ -f "scan-results/trivy-image.sarif" ]; then
-            echo "| Trivy | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          if [ -f "scan-results/trivy-fs.sarif" ]; then
+            echo "| Trivy Filesystem | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "| Trivy | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+            echo "| Trivy Filesystem | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f "scan-results/trivy-image.sarif" ]; then
+            echo "| Trivy Image | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Trivy Image | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi
           
           # Check Anchore results
