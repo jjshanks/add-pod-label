@@ -1,6 +1,18 @@
 name: Release
 
+# Triggers on either manual workflow dispatch (with version input) or when a semver tag is pushed
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., v1.2.3, v1.2.3-beta.1, v1.2.3+meta.4)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Is this a prerelease?'
+        required: false
+        type: boolean
+        default: false
   push:
     tags: [ 'v*.*.*' ]
 
@@ -9,11 +21,73 @@ permissions:
   packages: write # Required for pushing to GHCR
 
 jobs:
-  goreleaser:
-    name: Release
+  validate-version:
+    # This job only runs for manual releases to validate the version format and create the tag
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    
+    steps:
+      - name: Check version format
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          
+          # Check if version starts with 'v'
+          if [[ ! "$VERSION" =~ ^v ]]; then
+            echo "Error: Version must start with 'v'"
+            echo "Examples of valid versions:"
+            echo "  - v1.2.3 (release)"
+            echo "  - v1.2.3-alpha (pre-release)"
+            echo "  - v1.2.3-alpha.1 (pre-release with number)"
+            echo "  - v1.2.3-beta.2+meta.4 (pre-release with build metadata)"
+            echo "  - v1.2.3+meta (release with build metadata)"
+            exit 1
+          fi
+          
+          # Remove 'v' prefix for semver validation
+          VERSION_WITHOUT_V="${VERSION#v}"
+          
+          # Semver regex that supports pre-release and build metadata
+          SEMVER_REGEX="^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+([0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*))?$"
+          if ! echo "$VERSION_WITHOUT_V" | grep -E "$SEMVER_REGEX"; then
+            echo "Error: Version must be a valid semantic version"
+            echo "Examples of valid versions:"
+            echo "  - v1.2.3 (release)"
+            echo "  - v1.2.3-alpha (pre-release)"
+            echo "  - v1.2.3-alpha.1 (pre-release with number)"
+            echo "  - v1.2.3-beta.2+meta.4 (pre-release with build metadata)"
+            echo "  - v1.2.3+meta (release with build metadata)"
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required to access git history for tag creation
+
+      - name: Configure Git
+        # Set up Git credentials for creating and pushing the tag
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push tag
+        # Creates and pushes the new version tag if it doesn't already exist
+        run: |
+          TAG="${{ github.event.inputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists!"
+            exit 1
+          fi
+          git tag $TAG
+          git push origin $TAG
+
+  create-release:
+    # This job handles the actual release creation for both manual and tag-push triggers
+    needs: [validate-version]
+    if: |
+      always() &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && needs.validate-version.result == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # Set timeout to prevent hanging builds
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,9 +97,10 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
-          cache: true
+          cache: true # Enable Go modules cache
 
       - name: Login to GHCR
+        # Required for pushing container images to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -33,25 +108,27 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up QEMU
+        # Required for cross-platform container builds
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        # Configure Docker for multi-platform builds
         uses: docker/setup-buildx-action@v3
         with:
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64 # Specify target platforms for container images
 
       - name: Run GoReleaser
+        # Build binaries, create release, and push container images
         uses: goreleaser/goreleaser-action@v6
         with:
-          # either 'goreleaser' (default) or 'goreleaser-pro'
-          distribution: goreleaser
-          # 'latest', 'nightly', or a semver
+          distribution: goreleaser # Use OSS version of GoReleaser
           version: '~> v2'
-          args: release --clean
+          args: release --clean # Clean before building
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Update release notes
+        # Appends documentation link to the release notes
         if: success()
         uses: actions/github-script@v7
         with:
@@ -64,6 +141,7 @@ jobs:
               tag: tag
             });
             
+            // Add documentation link to release notes
             const releaseNotes = `## ${tag}\n\n${release.data.body}\n\n---\n\nFor installation instructions and documentation, please visit our [documentation](docs/README.md).`;
             
             await github.rest.repos.updateRelease({
