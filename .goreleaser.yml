@@ -21,6 +21,8 @@ dockers:
   - image_templates:
       - "ghcr.io/jjshanks/pod-label-webhook:{{ .Version }}"
       - "ghcr.io/jjshanks/pod-label-webhook:latest"
+    dockerfile: goreleaser.dockerfile
+    use: buildx
     build_flag_templates:
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.source={{.GitURL}}"
@@ -37,13 +39,13 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
 
 checksum:
-  name_template: 'checksums.txt'
+  name_template: "checksums.txt"
 
 changelog:
   sort: asc
   filters:
     exclude:
-      - '^docs:'
-      - '^test:'
-      - '^ci:'
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
       - Merge pull request
