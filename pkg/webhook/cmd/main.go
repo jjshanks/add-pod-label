@@ -6,8 +6,9 @@ import (
 	"net"
 	"os"
 
-	"github.com/jjshanks/pod-label-webhook/pkg/webhook"
 	"github.com/spf13/cobra"
+
+	"github.com/jjshanks/pod-label-webhook/pkg/webhook"
 )
 
 var (
