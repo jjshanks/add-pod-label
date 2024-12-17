@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -153,7 +154,7 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func Run() error {
+func Run(address string) error {
 	certPath := "/etc/webhook/certs/tls.crt"
 	keyPath := "/etc/webhook/certs/tls.key"
 
@@ -184,14 +185,17 @@ func Run() error {
 	mux.HandleFunc("/mutate", handleMutate)
 
 	server := &http.Server{
-		Addr:              ":8443",
+		Addr:              address,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
 	}
 
-	log.Printf("Starting webhook server on :8443")
+	log.Printf("Starting webhook server on %s", address)
 	return server.ListenAndServeTLS(certPath, keyPath)
 }
