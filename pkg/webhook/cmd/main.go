@@ -55,8 +55,11 @@ func init() {
 	// Local flags for the root command
 	rootCmd.Flags().StringVar(&address, "address", "0.0.0.0:8443", "The address and port to listen on (e.g., 0.0.0.0:8443)")
 
-	// Bind the flag to viper
-	viper.BindPFlag("address", rootCmd.Flags().Lookup("address"))
+	// Bind the flag to viper and handle any errors
+	if err := viper.BindPFlag("address", rootCmd.Flags().Lookup("address")); err != nil {
+		log.Printf("Error binding address flag: %v", err)
+		os.Exit(1)
+	}
 
 	// Set the environment variable prefix
 	viper.SetEnvPrefix("WEBHOOK")
