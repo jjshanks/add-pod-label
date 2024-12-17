@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -190,6 +191,9 @@ func Run(address string) error {
 		WriteTimeout:      10 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
 	}
 
 	log.Printf("Starting webhook server on %s", address)
