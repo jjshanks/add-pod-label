@@ -69,6 +69,12 @@ func initConfig() {
 	if cfgFile != "" {
 		// Use config file from the flag
 		viper.SetConfigFile(cfgFile)
+		// If the specified config file cannot be read, exit with error
+		if err := viper.ReadInConfig(); err != nil {
+			log.Printf("Error reading config file: %v", err)
+			os.Exit(1)
+		}
+		log.Printf("Using config file: %s", viper.ConfigFileUsed())
 	} else {
 		// Search for config in home directory
 		home, err := os.UserHomeDir()
@@ -81,15 +87,15 @@ func initConfig() {
 		viper.AddConfigPath(home)
 		viper.SetConfigType("yaml")
 		viper.SetConfigName(".webhook")
+
+		// Silently ignore error if default config file is not found
+		if err := viper.ReadInConfig(); err == nil {
+			log.Printf("Using config file: %s", viper.ConfigFileUsed())
+		}
 	}
 
 	// Read in environment variables that match
 	viper.AutomaticEnv()
-
-	// If a config file is found, read it in
-	if err := viper.ReadInConfig(); err == nil {
-		log.Printf("Using config file: %s", viper.ConfigFileUsed())
-	}
 
 	// Update the address from viper if it's set
 	if viper.IsSet("address") {
