@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"os"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -13,13 +14,30 @@ import (
 )
 
 var (
-	cfgFile string
-	address string
-	rootCmd = &cobra.Command{
+	cfgFile  string
+	address  string
+	logLevel string
+	console  bool
+	rootCmd  = &cobra.Command{
 		Use:   "webhook",
 		Short: "Kubernetes admission webhook for pod labeling",
 		Long:  `A webhook server that adds labels to pods using Kubernetes admission webhooks`,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			// Configure logging
+			level, err := zerolog.ParseLevel(logLevel)
+			if err != nil {
+				return fmt.Errorf("invalid log level %q: %v", logLevel, err)
+			}
+			zerolog.SetGlobalLevel(level)
+
+			// Configure console output if requested
+			if console {
+				log.Logger = log.Output(zerolog.ConsoleWriter{
+					Out:        os.Stdout,
+					TimeFormat: "2006-01-02T15:04:05.000Z",
+				})
+			}
+
 			// Validate address format
 			host, port, err := net.SplitHostPort(address)
 			if err != nil {
@@ -47,18 +65,28 @@ var (
 )
 
 func init() {
+	// Configure default zerolog
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+
 	cobra.OnInitialize(initConfig)
 
 	// Persistent flags belong to all commands
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.webhook.yaml)")
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (trace, debug, info, warn, error, fatal, panic)")
+	rootCmd.PersistentFlags().BoolVar(&console, "console", false, "Use console log format instead of JSON")
 
 	// Local flags for the root command
 	rootCmd.Flags().StringVar(&address, "address", "0.0.0.0:8443", "The address and port to listen on (e.g., 0.0.0.0:8443)")
 
-	// Bind the flag to viper and handle any errors
+	// Bind flags to viper
 	if err := viper.BindPFlag("address", rootCmd.Flags().Lookup("address")); err != nil {
-		log.Printf("Error binding address flag: %v", err)
-		os.Exit(1)
+		log.Fatal().Err(err).Msg("Error binding address flag")
+	}
+	if err := viper.BindPFlag("log-level", rootCmd.PersistentFlags().Lookup("log-level")); err != nil {
+		log.Fatal().Err(err).Msg("Error binding log-level flag")
+	}
+	if err := viper.BindPFlag("console", rootCmd.PersistentFlags().Lookup("console")); err != nil {
+		log.Fatal().Err(err).Msg("Error binding console flag")
 	}
 
 	// Set the environment variable prefix
@@ -74,15 +102,14 @@ func initConfig() {
 		viper.SetConfigFile(cfgFile)
 		// If the specified config file cannot be read, exit with error
 		if err := viper.ReadInConfig(); err != nil {
-			log.Printf("Error reading config file: %v", err)
-			os.Exit(1)
+			log.Fatal().Err(err).Msg("Error reading config file")
 		}
-		log.Printf("Using config file: %s", viper.ConfigFileUsed())
+		log.Info().Str("config", viper.ConfigFileUsed()).Msg("Using config file")
 	} else {
 		// Search for config in home directory
 		home, err := os.UserHomeDir()
 		if err != nil {
-			log.Printf("Error finding home directory: %v", err)
+			log.Error().Err(err).Msg("Error finding home directory")
 			return
 		}
 
@@ -93,7 +120,7 @@ func initConfig() {
 
 		// Silently ignore error if default config file is not found
 		if err := viper.ReadInConfig(); err == nil {
-			log.Printf("Using config file: %s", viper.ConfigFileUsed())
+			log.Info().Str("config", viper.ConfigFileUsed()).Msg("Using config file")
 		}
 	}
 
@@ -101,11 +128,20 @@ func initConfig() {
 	if viper.IsSet("address") {
 		address = viper.GetString("address")
 	}
+
+	// Update log level from viper if it's set
+	if viper.IsSet("log-level") {
+		logLevel = viper.GetString("log-level")
+	}
+
+	// Update console output from viper if it's set
+	if viper.IsSet("console") {
+		console = viper.GetBool("console")
+	}
 }
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		log.Printf("Error: %v", err)
-		os.Exit(1)
+		log.Fatal().Err(err).Msg("Error executing command")
 	}
 }
