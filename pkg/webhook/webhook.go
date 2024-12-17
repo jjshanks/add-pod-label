@@ -1,3 +1,4 @@
+// pkg/webhook/webhook.go
 package webhook
 
 import (
@@ -5,11 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,7 +33,6 @@ var (
 func init() {
 	_ = corev1.AddToScheme(runtimeScheme)
 	_ = admissionv1.AddToScheme(runtimeScheme)
-	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.LUTC | log.Lshortfile)
 }
 
 type patchOperation struct {
@@ -73,84 +73,83 @@ func createPatch(pod *corev1.Pod) ([]byte, error) {
 }
 
 func handleMutate(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Received request")
+	logger := log.With().Str("handler", "mutate").Logger()
+	logger.Debug().Msg("Received request")
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("Error reading body: %v", err)
+		logger.Error().Err(err).Msg("Error reading body")
 		http.Error(w, "error reading body", http.StatusBadRequest)
 		return
 	}
 
 	if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
-		log.Printf("Wrong content type: %s", contentType)
+		logger.Error().Str("content-type", contentType).Msg("Wrong content type")
 		http.Error(w, "invalid Content-Type, expected 'application/json'", http.StatusUnsupportedMediaType)
 		return
 	}
 
 	admissionReview := &admissionv1.AdmissionReview{}
 	if _, _, err := deserializer.Decode(body, nil, admissionReview); err != nil {
-		log.Printf("Error decoding admission review: %v", err)
+		logger.Error().Err(err).Msg("Error decoding admission review")
 		http.Error(w, fmt.Sprintf("error decoding: %v", err), http.StatusBadRequest)
 		return
 	}
 
 	request := admissionReview.Request
 	if request == nil {
-		log.Printf("Admission review request is nil")
+		logger.Error().Msg("Admission review request is nil")
 		http.Error(w, "admission review request is nil", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("Processing request for UID: %s", request.UID)
+	logger = logger.With().Str("uid", string(request.UID)).Logger()
+	logger.Debug().Msg("Processing request")
 
 	pod := &corev1.Pod{}
 	if err := json.Unmarshal(request.Object.Raw, pod); err != nil {
-		log.Printf("Error unmarshaling pod: %v", err)
+		logger.Error().Err(err).Msg("Error unmarshaling pod")
 		http.Error(w, fmt.Sprintf("error unmarshaling pod: %v", err), http.StatusBadRequest)
 		return
 	}
 
 	patchBytes, err := createPatch(pod)
 	if err != nil {
-		log.Printf("Error creating patch: %v", err)
+		logger.Error().Err(err).Msg("Error creating patch")
 		http.Error(w, fmt.Sprintf("error creating patch: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Created patch: %s", string(patchBytes))
+	logger.Debug().RawJSON("patch", patchBytes).Msg("Created patch")
 
 	patchType := admissionv1.PatchTypeJSONPatch
-	admissionResponse := &admissionv1.AdmissionResponse{
-		UID:       request.UID,
-		Allowed:   true,
-		Patch:     patchBytes,
-		PatchType: &patchType,
-	}
-
 	response := &admissionv1.AdmissionReview{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "admission.k8s.io/v1",
 			Kind:       "AdmissionReview",
 		},
-		Response: admissionResponse,
+		Response: &admissionv1.AdmissionResponse{
+			UID:       request.UID,
+			Allowed:   true,
+			Patch:     patchBytes,
+			PatchType: &patchType,
+		},
 	}
 
 	respBytes, err := json.Marshal(response)
 	if err != nil {
-		log.Printf("Error marshaling response: %v", err)
+		logger.Error().Err(err).Msg("Error marshaling response")
 		http.Error(w, fmt.Sprintf("error marshaling response: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Sending response for UID: %s", request.UID)
-	log.Printf("Response JSON: %s", string(respBytes))
+	logger.Debug().RawJSON("response", respBytes).Msg("Sending response")
 
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write(respBytes); err != nil {
-		log.Printf("Error writing response: %v", err)
+		logger.Error().Err(err).Msg("Error writing response")
 	} else {
-		log.Printf("Successfully wrote response")
+		logger.Debug().Msg("Successfully wrote response")
 	}
 }
 
@@ -196,6 +195,6 @@ func Run(address string) error {
 		},
 	}
 
-	log.Printf("Starting webhook server on %s", address)
+	log.Info().Str("address", address).Msg("Starting webhook server")
 	return server.ListenAndServeTLS(certPath, keyPath)
 }
