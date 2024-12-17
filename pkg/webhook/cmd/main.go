@@ -97,9 +97,6 @@ func initConfig() {
 		}
 	}
 
-	// Read in environment variables that match
-	viper.AutomaticEnv()
-
 	// Update the address from viper if it's set
 	if viper.IsSet("address") {
 		address = viper.GetString("address")
