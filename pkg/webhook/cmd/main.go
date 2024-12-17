@@ -7,11 +7,13 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/jjshanks/pod-label-webhook/pkg/webhook"
 )
 
 var (
+	cfgFile string
 	address string
 	rootCmd = &cobra.Command{
 		Use:   "webhook",
@@ -45,7 +47,54 @@ var (
 )
 
 func init() {
+	cobra.OnInitialize(initConfig)
+
+	// Persistent flags belong to all commands
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.webhook.yaml)")
+
+	// Local flags for the root command
 	rootCmd.Flags().StringVar(&address, "address", "0.0.0.0:8443", "The address and port to listen on (e.g., 0.0.0.0:8443)")
+
+	// Bind the flag to viper
+	viper.BindPFlag("address", rootCmd.Flags().Lookup("address"))
+
+	// Set the environment variable prefix
+	viper.SetEnvPrefix("WEBHOOK")
+
+	// Enable environment variable binding
+	viper.AutomaticEnv()
+}
+
+func initConfig() {
+	if cfgFile != "" {
+		// Use config file from the flag
+		viper.SetConfigFile(cfgFile)
+	} else {
+		// Search for config in home directory
+		home, err := os.UserHomeDir()
+		if err != nil {
+			log.Printf("Error finding home directory: %v", err)
+			return
+		}
+
+		// Search config in home directory with name ".webhook" (without extension)
+		viper.AddConfigPath(home)
+		viper.SetConfigType("yaml")
+		viper.SetConfigName(".webhook")
+	}
+
+	// Read in environment variables that match
+	viper.AutomaticEnv()
+
+	// If a config file is found, read it in
+	if err := viper.ReadInConfig(); err == nil {
+		log.Printf("Using config file: %s", viper.ConfigFileUsed())
+	}
+
+	// Update the address from viper if it's set
+	if viper.IsSet("address") {
+		address = viper.GetString("address")
+	}
 }
 
 func main() {
