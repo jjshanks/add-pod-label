@@ -7,8 +7,9 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"time"
+	"path/filepath"
 
+	"github.com/jjshanks/pod-label-webhook/pkg/webhook/config"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -153,18 +154,22 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func Run() error {
-	certPath := "/etc/webhook/certs/tls.crt"
-	keyPath := "/etc/webhook/certs/tls.key"
-
-	if !allowedCertPaths[certPath] {
-		return fmt.Errorf("certificate path not in allowlist: %s", certPath)
-	}
-	if !allowedCertPaths[keyPath] {
-		return fmt.Errorf("key path not in allowlist: %s", keyPath)
+func Run(cfg *config.Config) error {
+	// Validate that TLS configuration exists
+	if cfg.TLS.CertPath == "" || cfg.TLS.KeyPath == "" {
+		return fmt.Errorf("TLS certificate and key paths are required")
 	}
 
-	certInfo, err := os.Stat(certPath)
+	// Verify certificate paths are allowed
+	if !cfg.AllowedCertPaths[filepath.Dir(cfg.TLS.CertPath)] {
+		return fmt.Errorf("certificate path not in allowlist: %s", cfg.TLS.CertPath)
+	}
+	if !cfg.AllowedCertPaths[filepath.Dir(cfg.TLS.KeyPath)] {
+		return fmt.Errorf("key path not in allowlist: %s", cfg.TLS.KeyPath)
+	}
+
+	// Check that certificate file exists and is a regular file
+	certInfo, err := os.Stat(cfg.TLS.CertPath)
 	if err != nil {
 		return fmt.Errorf("certificate file error: %v", err)
 	}
@@ -172,7 +177,8 @@ func Run() error {
 		return fmt.Errorf("certificate path is not a regular file")
 	}
 
-	keyInfo, err := os.Stat(keyPath)
+	// Check that key file exists and is a regular file
+	keyInfo, err := os.Stat(cfg.TLS.KeyPath)
 	if err != nil {
 		return fmt.Errorf("key file error: %v", err)
 	}
@@ -180,18 +186,20 @@ func Run() error {
 		return fmt.Errorf("key path is not a regular file")
 	}
 
+	// Set up routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mutate", handleMutate)
 
+	// Create server with configuration
 	server := &http.Server{
-		Addr:              ":8443",
+		Addr:              fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: cfg.Server.ReadHeaderTimeout,
+		WriteTimeout:      cfg.Server.WriteTimeout,
+		ReadTimeout:       cfg.Server.ReadTimeout,
+		IdleTimeout:       cfg.Server.IdleTimeout,
 	}
 
-	log.Printf("Starting webhook server on :8443")
-	return server.ListenAndServeTLS(certPath, keyPath)
+	log.Printf("Starting webhook server on :%d", cfg.Server.Port)
+	return server.ListenAndServeTLS(cfg.TLS.CertPath, cfg.TLS.KeyPath)
 }
