@@ -2,7 +2,7 @@
 BINARY_NAME=pod-label-webhook
 DOCKER_REPO=ghcr.io/jjshanks
 IMAGE_NAME=$(DOCKER_REPO)/$(BINARY_NAME)
-VERSION?=latest
+VERSION?=$(shell git rev-parse --short HEAD)
 
 # Kubernetes related variables
 NAMESPACE=pod-label-system
@@ -52,20 +52,26 @@ dev-cleanup:
 
 # Deploy to local Kind cluster
 deploy:
+	@mkdir -p tmp/manifests
+	@cp manifests/*.yaml tmp/manifests/
+	@sed -i 's/$$(VERSION)/$(VERSION)/g' tmp/manifests/deployment.yaml
 	kubectl create namespace $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
-	kubectl apply -f manifests/webhook.yaml
-	# Wait for cert-manager to generate the certificate
+	kubectl apply -f tmp/manifests/webhook.yaml
 	kubectl wait --for=condition=Ready --timeout=60s -n $(NAMESPACE) certificate/pod-label-webhook-cert
-	kubectl apply -f manifests/deployment.yaml
+	kubectl apply -f tmp/manifests/deployment.yaml
+	@rm -rf tmp/manifests
+
+undeploy:
+	@mkdir -p tmp/manifests
+	@cp manifests/*.yaml tmp/manifests/
+	@sed -i 's/$$(VERSION)/$(VERSION)/g' tmp/manifests/deployment.yaml
+	kubectl delete -f tmp/manifests/deployment.yaml -f tmp/manifests/webhook.yaml --ignore-not-found
+	kubectl delete namespace $(NAMESPACE) --ignore-not-found
+	@rm -rf tmp/manifests
 
 # Build and load image into Kind
 dev-build: docker-build
 	kind load docker-image $(IMAGE_NAME):$(VERSION) --name $(KIND_CLUSTER_NAME)
-
-# Remove from Kubernetes
-undeploy:
-	kubectl delete -f manifests/deployment.yaml -f manifests/webhook.yaml --ignore-not-found
-	kubectl delete namespace $(NAMESPACE) --ignore-not-found
 
 # Run Go linting
 lint:
