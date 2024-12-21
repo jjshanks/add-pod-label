@@ -17,7 +17,7 @@ spec:
       containers:
         - name: webhook
           image: ghcr.io/jjshanks/pod-label-webhook:$(VERSION)
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           args:
             - "--cert-file=/tls/tls.crt"
             - "--key-file=/tls/tls.key"
@@ -45,6 +45,7 @@ spec:
         - name: cert
           secret:
             secretName: pod-label-webhook-cert
+            defaultMode: 0600
 ---
 apiVersion: v1
 kind: Service
