@@ -17,8 +17,8 @@ spec:
     spec:
       containers:
         - name: webhook
-          image: pod-label-webhook:latest
-          imagePullPolicy: Never  # Added this line for local images
+          image: ghcr.io/jjshanks/pod-label-webhook:$(VERSION)
+          imagePullPolicy: Never
           ports:
             - containerPort: 8443
           resources:

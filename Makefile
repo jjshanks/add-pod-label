@@ -1,132 +1,107 @@
-# Variables
-CLUSTER_NAME := webhook-test
-IMAGE_NAME := pod-label-webhook
-IMAGE_TAG := latest
-KIND_CONFIG := manifests/kind-config.yaml
+# Build variables
+BINARY_NAME=pod-label-webhook
+DOCKER_REPO=ghcr.io/jjshanks
+IMAGE_NAME=$(DOCKER_REPO)/$(BINARY_NAME)
+VERSION?=$(shell git rev-parse --short HEAD)
+
+# Kubernetes related variables
+NAMESPACE=pod-label-system
+KIND_CLUSTER_NAME=add-label-webhook
+
+.PHONY: all build test clean docker-build docker-push dev-setup dev-cleanup deploy undeploy lint lint-yaml lint-all verify
 
 # Default target
-.PHONY: help
+all: build
+
+# Build using goreleaser
+build:
+	goreleaser build --snapshot --clean
+
+# Run all tests
+test:
+	go test -v -race -cover ./...
+
+# Run integration tests
+test-integration:
+	go test -v -tags=integration ./...
+
+# Clean build artifacts
+clean:
+	rm -rf dist/
+	go clean -testcache
+
+# Build docker image using goreleaser
+docker-build:
+	goreleaser build --snapshot --clean
+
+# Push docker image
+docker-push: docker-build
+	docker push $(IMAGE_NAME):$(VERSION)
+
+# Development setup - creates kind cluster with cert-manager
+dev-setup:
+	kind create cluster --name $(KIND_CLUSTER_NAME) --config manifests/kind-config.yaml
+	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+	kubectl wait --for=condition=Ready --timeout=300s -n cert-manager deployment/cert-manager
+	kubectl wait --for=condition=Ready --timeout=300s -n cert-manager deployment/cert-manager-cainjector
+	kubectl wait --for=condition=Ready --timeout=300s -n cert-manager deployment/cert-manager-webhook
+
+# Development cleanup
+dev-cleanup:
+	kind delete cluster --name $(KIND_CLUSTER_NAME)
+
+# Deploy to local Kind cluster
+deploy:
+	@mkdir -p tmp/manifests
+	@cp manifests/*.yaml tmp/manifests/
+	@sed -i 's/$$(VERSION)/$(VERSION)/g' tmp/manifests/deployment.yaml
+	kubectl create namespace $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
+	kubectl apply -f tmp/manifests/webhook.yaml
+	kubectl wait --for=condition=Ready --timeout=60s -n $(NAMESPACE) certificate/pod-label-webhook-cert
+	kubectl apply -f tmp/manifests/deployment.yaml
+	@rm -rf tmp/manifests
+
+undeploy:
+	@mkdir -p tmp/manifests
+	@cp manifests/*.yaml tmp/manifests/
+	@sed -i 's/$$(VERSION)/$(VERSION)/g' tmp/manifests/deployment.yaml
+	kubectl delete -f tmp/manifests/deployment.yaml -f tmp/manifests/webhook.yaml --ignore-not-found
+	kubectl delete namespace $(NAMESPACE) --ignore-not-found
+	@rm -rf tmp/manifests
+
+# Build and load image into Kind
+dev-build: docker-build
+	kind load docker-image $(IMAGE_NAME):$(VERSION) --name $(KIND_CLUSTER_NAME)
+
+# Run Go linting
+lint:
+	golangci-lint run ./...
+
+# Run YAML linting
+lint-yaml:
+	yamllint .
+
+# Run all linting
+lint-all: lint lint-yaml
+
+# Verify all checks pass (useful for pre-commit)
+verify: lint-all test
+
+# Help target
 help:
 	@echo "Available targets:"
-	@echo "  create-cluster  - Creates a new kind cluster and installs cert-manager"
-	@echo "  delete-cluster  - Deletes the kind cluster"
-	@echo "  build          - Builds the webhook Docker image"
-	@echo "  load           - Loads the webhook image into kind cluster"
-	@echo "  deploy         - Deploys the webhook to the cluster"
-	@echo "  test           - Creates a test pod to verify webhook"
-	@echo "  debug          - Shows status of webhook deployment"
-	@echo "  all            - Builds, creates cluster, loads image, and deploys"
-
-.PHONY: create-cluster
-create-cluster:
-	@echo "Creating kind cluster..."
-	kind create cluster --name $(CLUSTER_NAME) --config $(KIND_CONFIG)
-	@echo "Installing cert-manager..."
-	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.3/cert-manager.yaml
-	@echo "Waiting for cert-manager namespace to be ready..."
-	sleep 15
-	@echo "Waiting for cert-manager pods..."
-	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=cert-manager -n cert-manager --timeout=90s
-	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=webhook -n cert-manager --timeout=90s
-	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=cainjector -n cert-manager --timeout=90s
-	@echo "Cert-manager installation complete"
-
-.PHONY: delete-cluster
-delete-cluster:
-	@echo "Deleting kind cluster..."
-	kind delete cluster --name $(CLUSTER_NAME)
-
-.PHONY: build
-build:
-	@echo "Building webhook image..."
-	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
-
-.PHONY: load
-load: build
-	@echo "Loading image into kind cluster..."
-	kind load docker-image $(IMAGE_NAME):$(IMAGE_TAG) --name $(CLUSTER_NAME)
-
-.PHONY: deploy
-deploy:
-	@echo "Deploying webhook..."
-	kubectl apply -f manifests/webhook.yaml
-	@echo "Waiting for webhook namespace to be created..."
-	sleep 5
-	@echo "Deploying webhook deployment and service..."
-	kubectl apply -f manifests/deployment.yaml
-	@echo "Waiting for webhook pod to be ready..."
-	kubectl wait --for=condition=ready pod -l app=pod-label-webhook -n pod-label-system --timeout=90s
-	@echo "Waiting for webhook to be fully operational..."
-	sleep 10
-	@echo "Deployment complete"
-
-.PHONY: test
-test:
-	@echo "Creating test pod..."
-	kubectl delete pod nginx --ignore-not-found
-	sleep 2
-	kubectl run nginx --image=nginx
-	@echo "Waiting for pod to be ready..."
-	kubectl wait --for=condition=ready pod/nginx --timeout=30s
-	@echo "Checking pod labels..."
-	kubectl get pod nginx --show-labels
-
-.PHONY: debug
-debug:
-	@echo "Checking pod status..."
-	kubectl get pods -n pod-label-system
-	@echo "\nChecking deployment status..."
-	kubectl describe deployment pod-label-webhook -n pod-label-system
-	@echo "\nChecking events..."
-	kubectl get events -n pod-label-system --sort-by='.lastTimestamp'
-	@echo "\nChecking webhook logs..."
-	kubectl logs -n pod-label-system deployment/pod-label-webhook
-
-.PHONY: all
-all: build create-cluster load deploy
-	@echo "Waiting for system to stabilize..."
-	sleep 10
-	@echo "Setup complete. You can now run 'make test' to verify the webhook."
-
-.PHONY: redeploy
-redeploy: build load
-	kubectl delete -f manifests/deployment.yaml || true
-	kubectl delete -f manifests/webhook.yaml || true
-	sleep 5
-	make deploy
-
-# Test targets
-.PHONY: test-unit
-test-unit:
-	@echo "Running unit tests..."
-	go test ./pkg/webhook -v -count=1 -short
-
-.PHONY: test-integration-debug
-test-integration-debug:
-	@echo "Running integration tests with debug output..."
-	go test ./pkg/webhook -v -count=1 -tags=integration -run TestWebhookIntegration -timeout 10m
-
-.PHONY: test-integration
-test-integration:
-	@echo "Running integration tests..."
-	-go test ./pkg/webhook -v -count=1 -tags=integration -run TestWebhookIntegration
-	@echo "Cleaning up..."
-	$(MAKE) clean-test
-
-.PHONY: test-coverage
-test-coverage:
-	@echo "Running tests with coverage..."
-	go test ./pkg/webhook -v -count=1 -short -coverprofile=coverage.out
-	go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report generated in coverage.html"
-
-.PHONY: test-all
-test-all: clean-test test-unit test-coverage test-integration
-	@echo "All tests completed"
-
-.PHONY: clean-test
-clean-test:
-	@echo "Cleaning up test artifacts..."
-	-kind delete cluster --name webhook-test 2>/dev/null || true
-	-rm -f coverage.out coverage.html
-	@echo "Test cleanup completed"
+	@echo "  build          - Build using goreleaser"
+	@echo "  test           - Run unit tests"
+	@echo "  test-integration - Run integration tests"
+	@echo "  clean          - Clean build artifacts"
+	@echo "  docker-build   - Build Docker image using goreleaser"
+	@echo "  docker-push    - Push Docker image to registry"
+	@echo "  dev-setup     - Create Kind cluster with cert-manager"
+	@echo "  dev-cleanup   - Delete Kind cluster"
+	@echo "  deploy        - Deploy webhook to cluster"
+	@echo "  dev-build     - Build and load image into Kind"
+	@echo "  undeploy      - Remove webhook from cluster"
+	@echo "  lint          - Run Go linting"
+	@echo "  lint-yaml     - Run YAML linting"
+	@echo "  lint-all      - Run all linting checks"
+	@echo "  verify        - Run all checks (linting and tests)"
