@@ -175,11 +175,11 @@ func validateCertPaths(certFile, keyFile string) error {
 
 	// Check key file permissions
 	keyMode := keyInfo.Mode()
-	if keyMode.Perm()&0077 != 0 {
+	if keyMode.Perm()&0o077 != 0 {
 		return fmt.Errorf("key file %s has excessive permissions %v, expected 0600 or more restrictive",
 			keyFile, keyMode.Perm())
 	}
-	if keyMode.Perm() > 0600 {
+	if keyMode.Perm() > 0o600 {
 		log.Warn().Str("key_file", keyFile).Msgf("key file has permissive mode %v, recommend 0600", keyMode.Perm())
 	}
 

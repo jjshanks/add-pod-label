@@ -254,10 +254,10 @@ func TestValidateCertPaths(t *testing.T) {
 	certPath := filepath.Join(tmpDir, "tls.crt")
 	keyPath := filepath.Join(tmpDir, "tls.key")
 
-	if err := os.WriteFile(certPath, []byte("test-cert"), 0644); err != nil {
+	if err := os.WriteFile(certPath, []byte("test-cert"), 0o644); err != nil {
 		t.Fatalf("failed to create test cert: %v", err)
 	}
-	if err := os.WriteFile(keyPath, []byte("test-key"), 0600); err != nil {
+	if err := os.WriteFile(keyPath, []byte("test-key"), 0o600); err != nil {
 		t.Fatalf("failed to create test key: %v", err)
 	}
 
@@ -273,14 +273,14 @@ func TestValidateCertPaths(t *testing.T) {
 			name:      "valid paths and permissions",
 			certFile:  certPath,
 			keyFile:   keyPath,
-			keyMode:   0600,
+			keyMode:   0o600,
 			expectErr: false,
 		},
 		{
 			name:      "invalid cert path",
 			certFile:  "/nonexistent/cert",
 			keyFile:   keyPath,
-			keyMode:   0600,
+			keyMode:   0o600,
 			expectErr: true,
 			errMsg:    "certificate file error",
 		},
@@ -288,7 +288,7 @@ func TestValidateCertPaths(t *testing.T) {
 			name:      "invalid key path",
 			certFile:  certPath,
 			keyFile:   "/nonexistent/key",
-			keyMode:   0600,
+			keyMode:   0o600,
 			expectErr: true,
 			errMsg:    "key file error",
 		},
@@ -296,7 +296,7 @@ func TestValidateCertPaths(t *testing.T) {
 			name:      "key too permissive (world readable)",
 			certFile:  certPath,
 			keyFile:   keyPath,
-			keyMode:   0644,
+			keyMode:   0o644,
 			expectErr: true,
 			errMsg:    "has excessive permissions",
 		},
@@ -304,7 +304,7 @@ func TestValidateCertPaths(t *testing.T) {
 			name:      "key too permissive (group readable)",
 			certFile:  certPath,
 			keyFile:   keyPath,
-			keyMode:   0640,
+			keyMode:   0o640,
 			expectErr: true,
 			errMsg:    "has excessive permissions",
 		},
@@ -312,14 +312,14 @@ func TestValidateCertPaths(t *testing.T) {
 			name:      "key minimally permissive",
 			certFile:  certPath,
 			keyFile:   keyPath,
-			keyMode:   0600,
+			keyMode:   0o600,
 			expectErr: false,
 		},
 		{
 			name:      "key more restrictive",
 			certFile:  certPath,
 			keyFile:   keyPath,
-			keyMode:   0400,
+			keyMode:   0o400,
 			expectErr: false,
 		},
 	}
