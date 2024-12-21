@@ -42,9 +42,9 @@ docker-push: docker-build
 dev-setup:
 	kind create cluster --name $(KIND_CLUSTER_NAME) --config manifests/kind-config.yaml
 	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
-	kubectl wait --for=condition=Available --timeout=300s -n cert-manager deployment/cert-manager
-	kubectl wait --for=condition=Available --timeout=300s -n cert-manager deployment/cert-manager-cainjector
-	kubectl wait --for=condition=Available --timeout=300s -n cert-manager deployment/cert-manager-webhook
+	kubectl wait --for=condition=Ready --timeout=300s -n cert-manager deployment/cert-manager
+	kubectl wait --for=condition=Ready --timeout=300s -n cert-manager deployment/cert-manager-cainjector
+	kubectl wait --for=condition=Ready --timeout=300s -n cert-manager deployment/cert-manager-webhook
 
 # Development cleanup
 dev-cleanup:
