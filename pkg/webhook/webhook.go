@@ -173,6 +173,16 @@ func validateCertPaths(certFile, keyFile string) error {
 		return fmt.Errorf("key path is not a regular file")
 	}
 
+	// Check key file permissions
+	keyMode := keyInfo.Mode()
+	if keyMode.Perm()&0077 != 0 {
+		return fmt.Errorf("key file %s has excessive permissions %v, expected 0600 or more restrictive",
+			keyFile, keyMode.Perm())
+	}
+	if keyMode.Perm() > 0600 {
+		log.Warn().Str("key_file", keyFile).Msgf("key file has permissive mode %v, recommend 0600", keyMode.Perm())
+	}
+
 	// Validate parent directories
 	certDir := filepath.Dir(certFile)
 	keyDir := filepath.Dir(keyFile)
