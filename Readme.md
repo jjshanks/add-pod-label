@@ -102,6 +102,14 @@ The webhook supports the following configuration options:
 - `make lint-yaml` - Run YAML linting
 - `make verify` - Run all checks (linting and tests)
 
+### Integration Tests
+
+Integration tests can be triggered in pull requests by:
+1. Adding the 'integration-test' label to the PR
+2. Including '#integ-test' in any commit message
+3. Including '#integ-test' in the PR title
+4. Automatically for Dependabot PRs
+
 ### Release Process
 
 Releases are automated using GitHub Actions. To create a new release:

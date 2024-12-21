@@ -90,7 +90,9 @@ jobs:
     needs: verify
     if: |
       github.actor == 'dependabot[bot]' ||
-      contains(github.event.pull_request.labels.*.name, 'integration-test')
+      contains(github.event.pull_request.labels.*.name, 'integration-test') ||
+      contains(github.event.pull_request.title, '#integ-test') ||
+      contains(join(github.event.pull_request.commits.*.message, ' '), '#integ-test')
     
     steps:
       - uses: actions/checkout@v4
