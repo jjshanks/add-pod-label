@@ -47,7 +47,7 @@ spec:
             secretName: pod-label-webhook-cert
 ----
 apiVersion: v1
-ind: Service
+kind: Service
 metadata:
   name: pod-label-webhook
   namespace: pod-label-system
