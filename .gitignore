@@ -23,3 +23,6 @@ vendor/
 
 # goreleaser
 dist
+
+# AI
+flat/

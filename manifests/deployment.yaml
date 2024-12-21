@@ -1,5 +1,4 @@
 # manifests/deployment.yaml
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,7 +17,17 @@ spec:
       containers:
         - name: webhook
           image: ghcr.io/jjshanks/pod-label-webhook:$(VERSION)
-          imagePullPolicy: Never
+          imagePullPolicy: Always
+          args:
+            - "--cert-file=/tls/tls.crt"
+            - "--key-file=/tls/tls.key"
+          env:
+            - name: WEBHOOK_LOG_LEVEL
+              value: "info"
+            - name: WEBHOOK_CERT_FILE
+              value: "/tls/tls.crt"
+            - name: WEBHOOK_KEY_FILE
+              value: "/tls/tls.key"
           ports:
             - containerPort: 8443
           resources:
@@ -30,7 +39,7 @@ spec:
               cpu: "250m"
           volumeMounts:
             - name: cert
-              mountPath: /etc/webhook/certs
+              mountPath: /tls
               readOnly: true
       volumes:
         - name: cert

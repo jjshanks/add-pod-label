@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -22,17 +23,17 @@ var (
 	runtimeScheme = runtime.NewScheme()
 	codecs        = serializer.NewCodecFactory(runtimeScheme)
 	deserializer  = codecs.UniversalDeserializer()
-
-	// Define a strict allowlist of valid certificate paths
-	allowedCertPaths = map[string]bool{
-		"/etc/webhook/certs/tls.crt": true,
-		"/etc/webhook/certs/tls.key": true,
-	}
 )
 
 func init() {
 	_ = corev1.AddToScheme(runtimeScheme)
 	_ = admissionv1.AddToScheme(runtimeScheme)
+}
+
+type Config struct {
+	CertFile string
+	KeyFile  string
+	Address  string
 }
 
 type patchOperation struct {
@@ -153,18 +154,9 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func Run(address string) error {
-	certPath := "/etc/webhook/certs/tls.crt"
-	keyPath := "/etc/webhook/certs/tls.key"
-
-	if !allowedCertPaths[certPath] {
-		return fmt.Errorf("certificate path not in allowlist: %s", certPath)
-	}
-	if !allowedCertPaths[keyPath] {
-		return fmt.Errorf("key path not in allowlist: %s", keyPath)
-	}
-
-	certInfo, err := os.Stat(certPath)
+func validateCertPaths(certFile, keyFile string) error {
+	// Validate certificate file
+	certInfo, err := os.Stat(certFile)
 	if err != nil {
 		return fmt.Errorf("certificate file error: %v", err)
 	}
@@ -172,7 +164,8 @@ func Run(address string) error {
 		return fmt.Errorf("certificate path is not a regular file")
 	}
 
-	keyInfo, err := os.Stat(keyPath)
+	// Validate key file
+	keyInfo, err := os.Stat(keyFile)
 	if err != nil {
 		return fmt.Errorf("key file error: %v", err)
 	}
@@ -180,11 +173,50 @@ func Run(address string) error {
 		return fmt.Errorf("key path is not a regular file")
 	}
 
+	// Check key file permissions
+	keyMode := keyInfo.Mode()
+	if keyMode.Perm()&0o077 != 0 {
+		return fmt.Errorf("key file %s has excessive permissions %v, expected 0600 or more restrictive",
+			keyFile, keyMode.Perm())
+	}
+	if keyMode.Perm() > 0o600 {
+		log.Warn().Str("key_file", keyFile).Msgf("key file has permissive mode %v, recommend 0600", keyMode.Perm())
+	}
+
+	// Validate parent directories
+	certDir := filepath.Dir(certFile)
+	keyDir := filepath.Dir(keyFile)
+
+	certDirInfo, err := os.Stat(certDir)
+	if err != nil {
+		return fmt.Errorf("certificate directory error: %v", err)
+	}
+	if !certDirInfo.IsDir() {
+		return fmt.Errorf("certificate parent path is not a directory")
+	}
+
+	keyDirInfo, err := os.Stat(keyDir)
+	if err != nil {
+		return fmt.Errorf("key directory error: %v", err)
+	}
+	if !keyDirInfo.IsDir() {
+		return fmt.Errorf("key parent path is not a directory")
+	}
+
+	return nil
+}
+
+func Run(config Config) error {
+	// Validate certificate paths
+	if err := validateCertPaths(config.CertFile, config.KeyFile); err != nil {
+		return fmt.Errorf("certificate validation failed: %v", err)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mutate", handleMutate)
 
 	server := &http.Server{
-		Addr:              address,
+		Addr:              config.Address,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -195,6 +227,11 @@ func Run(address string) error {
 		},
 	}
 
-	log.Info().Str("address", address).Msg("Starting webhook server")
-	return server.ListenAndServeTLS(certPath, keyPath)
+	log.Info().
+		Str("address", config.Address).
+		Str("cert_file", config.CertFile).
+		Str("key_file", config.KeyFile).
+		Msg("Starting webhook server")
+
+	return server.ListenAndServeTLS(config.CertFile, config.KeyFile)
 }
