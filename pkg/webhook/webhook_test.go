@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -235,6 +238,109 @@ func TestCreatePatch(t *testing.T) {
 						t.Errorf("patch is missing existing label %s=%s", k, v)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestValidateCertPaths(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "webhook-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create test files
+	certPath := filepath.Join(tmpDir, "tls.crt")
+	keyPath := filepath.Join(tmpDir, "tls.key")
+
+	if err := os.WriteFile(certPath, []byte("test-cert"), 0644); err != nil {
+		t.Fatalf("failed to create test cert: %v", err)
+	}
+	if err := os.WriteFile(keyPath, []byte("test-key"), 0600); err != nil {
+		t.Fatalf("failed to create test key: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		certFile  string
+		keyFile   string
+		keyMode   os.FileMode
+		expectErr bool
+		errMsg    string
+	}{
+		{
+			name:      "valid paths and permissions",
+			certFile:  certPath,
+			keyFile:   keyPath,
+			keyMode:   0600,
+			expectErr: false,
+		},
+		{
+			name:      "invalid cert path",
+			certFile:  "/nonexistent/cert",
+			keyFile:   keyPath,
+			keyMode:   0600,
+			expectErr: true,
+			errMsg:    "certificate file error",
+		},
+		{
+			name:      "invalid key path",
+			certFile:  certPath,
+			keyFile:   "/nonexistent/key",
+			keyMode:   0600,
+			expectErr: true,
+			errMsg:    "key file error",
+		},
+		{
+			name:      "key too permissive (world readable)",
+			certFile:  certPath,
+			keyFile:   keyPath,
+			keyMode:   0644,
+			expectErr: true,
+			errMsg:    "has excessive permissions",
+		},
+		{
+			name:      "key too permissive (group readable)",
+			certFile:  certPath,
+			keyFile:   keyPath,
+			keyMode:   0640,
+			expectErr: true,
+			errMsg:    "has excessive permissions",
+		},
+		{
+			name:      "key minimally permissive",
+			certFile:  certPath,
+			keyFile:   keyPath,
+			keyMode:   0600,
+			expectErr: false,
+		},
+		{
+			name:      "key more restrictive",
+			certFile:  certPath,
+			keyFile:   keyPath,
+			keyMode:   0400,
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.keyFile == keyPath {
+				if err := os.Chmod(keyPath, tt.keyMode); err != nil {
+					t.Fatalf("failed to chmod key file: %v", err)
+				}
+			}
+
+			err := validateCertPaths(tt.certFile, tt.keyFile)
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error but got none")
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("expected error containing %q but got %v", tt.errMsg, err)
+				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 	}
