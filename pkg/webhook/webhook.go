@@ -30,7 +30,7 @@ func init() {
 	_ = admissionv1.AddToScheme(runtimeScheme)
 }
 
-type WebhookConfig struct {
+type Config struct {
 	CertFile string
 	KeyFile  string
 	Address  string
@@ -196,7 +196,7 @@ func validateCertPaths(certFile, keyFile string) error {
 	return nil
 }
 
-func Run(config WebhookConfig) error {
+func Run(config Config) error {
 	// Validate certificate paths
 	if err := validateCertPaths(config.CertFile, config.KeyFile); err != nil {
 		return fmt.Errorf("certificate validation failed: %v", err)

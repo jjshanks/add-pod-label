@@ -61,7 +61,7 @@ var (
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			config := webhook.WebhookConfig{
+			config := webhook.Config{
 				CertFile: certFile,
 				KeyFile:  keyFile,
 				Address:  address,
