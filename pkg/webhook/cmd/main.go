@@ -18,6 +18,8 @@ var (
 	address  string
 	logLevel string
 	console  bool
+	certFile string
+	keyFile  string
 	rootCmd  = &cobra.Command{
 		Use:   "webhook",
 		Short: "Kubernetes admission webhook for pod labeling",
@@ -59,7 +61,12 @@ var (
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return webhook.Run(address)
+			config := webhook.WebhookConfig{
+				CertFile: certFile,
+				KeyFile:  keyFile,
+				Address:  address,
+			}
+			return webhook.Run(config)
 		},
 	}
 )
@@ -77,10 +84,18 @@ func init() {
 
 	// Local flags for the root command
 	rootCmd.Flags().StringVar(&address, "address", "0.0.0.0:8443", "The address and port to listen on (e.g., 0.0.0.0:8443)")
+	rootCmd.Flags().StringVar(&certFile, "cert-file", "/etc/webhook/certs/tls.crt", "Path to the TLS certificate file")
+	rootCmd.Flags().StringVar(&keyFile, "key-file", "/etc/webhook/certs/tls.key", "Path to the TLS key file")
 
 	// Bind flags to viper
 	if err := viper.BindPFlag("address", rootCmd.Flags().Lookup("address")); err != nil {
 		log.Fatal().Err(err).Msg("Error binding address flag")
+	}
+	if err := viper.BindPFlag("cert-file", rootCmd.Flags().Lookup("cert-file")); err != nil {
+		log.Fatal().Err(err).Msg("Error binding cert-file flag")
+	}
+	if err := viper.BindPFlag("key-file", rootCmd.Flags().Lookup("key-file")); err != nil {
+		log.Fatal().Err(err).Msg("Error binding key-file flag")
 	}
 	if err := viper.BindPFlag("log-level", rootCmd.PersistentFlags().Lookup("log-level")); err != nil {
 		log.Fatal().Err(err).Msg("Error binding log-level flag")
@@ -124,17 +139,19 @@ func initConfig() {
 		}
 	}
 
-	// Update the address from viper if it's set
+	// Update the values from viper if they're set
 	if viper.IsSet("address") {
 		address = viper.GetString("address")
 	}
-
-	// Update log level from viper if it's set
+	if viper.IsSet("cert-file") {
+		certFile = viper.GetString("cert-file")
+	}
+	if viper.IsSet("key-file") {
+		keyFile = viper.GetString("key-file")
+	}
 	if viper.IsSet("log-level") {
 		logLevel = viper.GetString("log-level")
 	}
-
-	// Update console output from viper if it's set
 	if viper.IsSet("console") {
 		console = viper.GetBool("console")
 	}

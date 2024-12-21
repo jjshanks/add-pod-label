@@ -2,7 +2,8 @@
 BINARY_NAME=pod-label-webhook
 DOCKER_REPO=ghcr.io/jjshanks
 IMAGE_NAME=$(DOCKER_REPO)/$(BINARY_NAME)
-VERSION?=$(shell git rev-parse --short HEAD)
+GIT_COMMIT=$(shell git rev-parse --short HEAD)
+VERSION?=0.0.1-SNAPSHOT-$(GIT_COMMIT)
 
 # Kubernetes related variables
 NAMESPACE=pod-label-system
@@ -51,7 +52,7 @@ dev-cleanup:
 	kind delete cluster --name $(KIND_CLUSTER_NAME)
 
 # Deploy to local Kind cluster
-deploy:
+deploy: dev-build
 	@mkdir -p tmp/manifests
 	@cp manifests/*.yaml tmp/manifests/
 	@sed -i 's/$$(VERSION)/$(VERSION)/g' tmp/manifests/deployment.yaml
@@ -59,6 +60,7 @@ deploy:
 	kubectl apply -f tmp/manifests/webhook.yaml
 	kubectl wait --for=condition=Ready --timeout=60s -n $(NAMESPACE) certificate/pod-label-webhook-cert
 	kubectl apply -f tmp/manifests/deployment.yaml
+	kubectl wait --for=condition=Available --timeout=60s -n $(NAMESPACE) deployment/pod-label-webhook
 	@rm -rf tmp/manifests
 
 undeploy:
@@ -70,7 +72,10 @@ undeploy:
 	@rm -rf tmp/manifests
 
 # Build and load image into Kind
-dev-build: docker-build
+dev-build:
+	@echo "Building with version: $(VERSION)"
+	goreleaser release --snapshot --clean --skip=publish
+	@echo "Loading image: $(IMAGE_NAME):$(VERSION)"
 	kind load docker-image $(IMAGE_NAME):$(VERSION) --name $(KIND_CLUSTER_NAME)
 
 # Run Go linting
