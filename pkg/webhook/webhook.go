@@ -223,7 +223,22 @@ func Run(config Config) error {
 		ReadTimeout:       10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		TLSConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
+			MinVersion: tls.VersionTLS13, // Require TLS 1.3
+			CipherSuites: []uint16{
+				// TLS 1.3 cipher suites
+				tls.TLS_AES_128_GCM_SHA256,
+				tls.TLS_AES_256_GCM_SHA384,
+				tls.TLS_CHACHA20_POLY1305_SHA256,
+			},
+			PreferServerCipherSuites: true, // Let server choose more secure cipher suites
+			CurvePreferences: []tls.CurveID{
+				tls.X25519,
+				tls.CurveP384,
+			},
+			SessionTicketsDisabled: true,                        // Disable session tickets for perfect forward secrecy
+			Renegotiation:          tls.RenegotiateNever,        // Disable renegotiation
+			InsecureSkipVerify:     false,                       // Never skip certificate verification
+			ClientAuth:             tls.VerifyClientCertIfGiven, // Verify client certs if provided
 		},
 	}
 
