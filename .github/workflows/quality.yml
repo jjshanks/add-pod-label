@@ -104,4 +104,4 @@ jobs:
             -summary \
             -strict \
             -verbose \
-            manifests/*.yaml
+            tests/manifests/*.yaml
