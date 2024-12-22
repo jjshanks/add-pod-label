@@ -114,7 +114,7 @@ jobs:
           sudo mv ./kubectl /usr/local/bin/kubectl
       
       - name: Run integration tests
-        run: make test-integration-debug
+        run: make test-integration
         timeout-minutes: 15
 
   notify-failure:

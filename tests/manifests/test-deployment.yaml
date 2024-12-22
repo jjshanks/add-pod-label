@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: integ-test
+  namespace: default
+  labels:
+    app: integ-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: integ-test
+  template:
+    metadata:
+      labels:
+        app: integ-test
+    spec:
+      containers:
+        - name: integ-test
+          image: busybox
+          command: ["sh", "-c", "sleep infinity"]

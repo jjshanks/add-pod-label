@@ -33,19 +33,15 @@ git clone https://github.com/jjshanks/pod-label-webhook.git
 cd pod-label-webhook
 ```
 
-2. Set up a local Kind cluster with cert-manager:
+2. Build and run tests:
 ```bash
-make dev-setup
+make build
+make test
 ```
 
-3. Build and load the webhook image:
+3. Run integration tests:
 ```bash
-make dev-build
-```
-
-4. Deploy the webhook:
-```bash
-make deploy
+make test-integration
 ```
 
 ### Production Deployment
@@ -53,7 +49,7 @@ make deploy
 The webhook can be installed using the provided Kubernetes manifests:
 
 ```bash
-kubectl create namespace pod-label-system
+kubectl create namespace webhook-test
 kubectl apply -f manifests/
 ```
 
@@ -81,7 +77,9 @@ The webhook supports the following configuration options:
 │   ├── cmd/         # Command line interface
 │   ├── webhook.go   # Main webhook logic
 │   └── *_test.go    # Tests
-├── manifests/       # Kubernetes deployment manifests
+├── tests/           # Test resources
+│   ├── manifests/   # Test deployment manifests
+│   └── scripts/     # Testing scripts
 └── Dockerfile       # Container build definition
 ```
 
@@ -91,18 +89,17 @@ The webhook supports the following configuration options:
 - `make test` - Run unit tests
 - `make test-integration` - Run integration tests
 - `make clean` - Clean build artifacts
-- `make docker-build` - Build Docker image using goreleaser
-- `make docker-push` - Push Docker image to registry
-- `make dev-setup` - Create Kind cluster with cert-manager
-- `make dev-cleanup` - Delete Kind cluster
-- `make deploy` - Deploy webhook to cluster
-- `make dev-build` - Build and load image into Kind
-- `make undeploy` - Remove webhook from cluster
 - `make lint` - Run Go linting
 - `make lint-yaml` - Run YAML linting
 - `make verify` - Run all checks (linting and tests)
 
 ### Integration Tests
+
+Integration tests use shell scripts to create a Kind cluster, deploy the webhook, and verify its functionality. The tests:
+1. Create a Kind cluster with cert-manager
+2. Build and deploy the webhook
+3. Create a test deployment
+4. Verify the webhook adds the expected label
 
 Integration tests can be triggered in pull requests by:
 1. Adding the 'integration-test' label to the PR

@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: pod-label-webhook
-  namespace: pod-label-system
+  namespace: webhook-test
 spec:
   replicas: 1
   selector:
@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: webhook
-          image: ghcr.io/jjshanks/pod-label-webhook:$(VERSION)
+          image: ghcr.io/jjshanks/pod-label-webhook:latest
           imagePullPolicy: IfNotPresent
           args:
             - "--cert-file=/tls/tls.crt"
@@ -51,7 +51,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: pod-label-webhook
-  namespace: pod-label-system
+  namespace: webhook-test
 spec:
   type: ClusterIP
   ports:

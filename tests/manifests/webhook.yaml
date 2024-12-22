@@ -3,17 +3,17 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: pod-label-system
+  name: webhook-test
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: pod-label-webhook-cert
-  namespace: pod-label-system
+  namespace: webhook-test
 spec:
   dnsNames:
-    - pod-label-webhook.pod-label-system.svc
-    - pod-label-webhook.pod-label-system.svc.cluster.local
+    - pod-label-webhook.webhook-test.svc
+    - pod-label-webhook.webhook-test.svc.cluster.local
   issuerRef:
     kind: Issuer
     name: pod-label-selfsigned-issuer
@@ -23,7 +23,7 @@ apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
   name: pod-label-selfsigned-issuer
-  namespace: pod-label-system
+  namespace: webhook-test
 spec:
   selfSigned: {}
 ---
@@ -32,13 +32,13 @@ kind: MutatingWebhookConfiguration
 metadata:
   name: pod-label-webhook
   annotations:
-    cert-manager.io/inject-ca-from: pod-label-system/pod-label-webhook-cert
+    cert-manager.io/inject-ca-from: webhook-test/pod-label-webhook-cert
 webhooks:
   - name: pod-label.example.com
     clientConfig:
       service:
         name: pod-label-webhook
-        namespace: pod-label-system
+        namespace: webhook-test
         path: "/mutate"
       caBundle: ""
     rules:
@@ -52,4 +52,4 @@ webhooks:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: NotIn
-          values: ["kube-system", "cert-manager", "pod-label-system"]
+          values: ["kube-system", "cert-manager", "webhook-test"]
