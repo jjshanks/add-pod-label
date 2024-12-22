@@ -82,7 +82,7 @@ jobs:
       - name: YAML lint
         uses: ibiqlik/action-yamllint@v3.1 
         with:
-          file_or_dir: manifests/
+          file_or_dir: tests/manifests/
           config_file: .yamllint.yml
           strict: true
 
@@ -104,4 +104,4 @@ jobs:
             -summary \
             -strict \
             -verbose \
-            manifests/*.yaml
+            tests/manifests/*.yaml
