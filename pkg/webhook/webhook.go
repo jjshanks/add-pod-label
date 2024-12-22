@@ -230,7 +230,6 @@ func Run(config Config) error {
 				tls.TLS_AES_256_GCM_SHA384,
 				tls.TLS_CHACHA20_POLY1305_SHA256,
 			},
-			PreferServerCipherSuites: true, // Let server choose more secure cipher suites
 			CurvePreferences: []tls.CurveID{
 				tls.X25519,
 				tls.CurveP384,
