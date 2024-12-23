@@ -42,11 +42,6 @@ func init() {
 	// Configure default zerolog
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
-	// Initialize viper
-	cobra.OnInitialize(func() {
-		config.InitViper(cfgFile)
-	})
-
 	// Persistent flags belong to all commands
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.webhook.yaml)")
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level (trace, debug, info, warn, error, fatal, panic)")

@@ -107,7 +107,16 @@ func (c *Config) ValidateCertPaths() error {
 // LoadConfig loads the configuration from viper
 func LoadConfig(cfgFile string) (*Config, error) {
 	config := New()
-	bindEnvVars()
+
+	viper.SetEnvPrefix("WEBHOOK")
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+	viper.AutomaticEnv()
+
+	// Bind all config keys at once
+	configKeys := []string{"address", "cert-file", "key-file", "log-level", "console"}
+	for _, key := range configKeys {
+		viper.BindEnv(key)
+	}
 
 	if cfgFile != "" {
 		// Use config file from the flag
@@ -191,21 +200,4 @@ func LoadConfig(cfgFile string) (*Config, error) {
 	}
 
 	return config, nil
-}
-
-func bindEnvVars() {
-	viper.SetEnvPrefix("WEBHOOK")
-	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
-	viper.AutomaticEnv()
-
-	// Bind all config keys at once
-	configKeys := []string{"address", "cert-file", "key-file", "log-level", "console"}
-	for _, key := range configKeys {
-		viper.BindEnv(key)
-	}
-}
-
-// InitViper initializes viper with flags and environment variables
-func InitViper(cfgFile string) {
-	bindEnvVars()
 }

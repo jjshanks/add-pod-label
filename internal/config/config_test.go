@@ -384,9 +384,6 @@ console: true
 				defer os.Unsetenv(k)
 			}
 
-			// Initialize viper
-			InitViper(tt.configFile)
-
 			// Load config
 			got, err := LoadConfig(tt.configFile)
 			if tt.wantErr {
@@ -405,34 +402,4 @@ console: true
 			assert.Equal(t, tt.want.Console, got.Console)
 		})
 	}
-}
-
-func TestInitViper(t *testing.T) {
-	// Reset viper before test
-	viper.Reset()
-
-	// Initialize viper
-	InitViper("")
-
-	// Test environment binding
-	envVars := map[string]string{
-		"WEBHOOK_ADDRESS":   "localhost:8443",
-		"WEBHOOK_CERT_FILE": "/custom/cert/path",
-		"WEBHOOK_KEY_FILE":  "/custom/key/path",
-		"WEBHOOK_LOG_LEVEL": "debug",
-		"WEBHOOK_CONSOLE":   "true",
-	}
-
-	for k, v := range envVars {
-		err := os.Setenv(k, v)
-		require.NoError(t, err)
-		defer os.Unsetenv(k)
-	}
-
-	// Verify that viper can read the environment variables
-	assert.Equal(t, "localhost:8443", viper.GetString("address"))
-	assert.Equal(t, "/custom/cert/path", viper.GetString("cert-file"))
-	assert.Equal(t, "/custom/key/path", viper.GetString("key-file"))
-	assert.Equal(t, "debug", viper.GetString("log-level"))
-	assert.Equal(t, true, viper.GetBool("console"))
 }
