@@ -253,19 +253,19 @@ console: true
 
 	// Write test config files
 	validConfigFile := filepath.Join(tmpDir, "valid-config.yaml")
-	err = os.WriteFile(validConfigFile, []byte(validConfig), 0644)
+	err = os.WriteFile(validConfigFile, []byte(validConfig), 0o644)
 	require.NoError(t, err)
 
 	emptyConfigFile := filepath.Join(tmpDir, "empty-config.yaml")
-	err = os.WriteFile(emptyConfigFile, []byte(emptyConfig), 0644)
+	err = os.WriteFile(emptyConfigFile, []byte(emptyConfig), 0o644)
 	require.NoError(t, err)
 
 	invalidTypeConfigFile := filepath.Join(tmpDir, "invalid-type-config.yaml")
-	err = os.WriteFile(invalidTypeConfigFile, []byte(invalidTypeConfig), 0644)
+	err = os.WriteFile(invalidTypeConfigFile, []byte(invalidTypeConfig), 0o644)
 	require.NoError(t, err)
 
 	malformedConfigFile := filepath.Join(tmpDir, "malformed-config.yaml")
-	err = os.WriteFile(malformedConfigFile, []byte(malformedConfig), 0644)
+	err = os.WriteFile(malformedConfigFile, []byte(malformedConfig), 0o644)
 	require.NoError(t, err)
 
 	nonexistentFile := filepath.Join(tmpDir, "nonexistent.yaml")
