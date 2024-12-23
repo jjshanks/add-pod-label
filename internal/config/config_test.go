@@ -1,3 +1,4 @@
+// pkg/config/config_test.go
 package config
 
 import (
@@ -222,17 +223,52 @@ func TestLoadConfig(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	// Create test config file
-	configContent := `
+	// Create test config files
+	validConfig := `
 address: "127.0.0.1:8443"
 cert-file: "/custom/cert/path"
 key-file: "/custom/key/path"
 log-level: "debug"
 console: true
 `
-	configFile := filepath.Join(tmpDir, "config.yaml")
-	err = os.WriteFile(configFile, []byte(configContent), 0o644)
+	emptyConfig := ``
+
+	invalidTypeConfig := `
+address: 8443
+cert-file:
+log-level: ["debug"]
+console: "not-a-bool"
+key-file:
+`
+
+	malformedConfig := `
+address: "127.0.0.1:8443"
+cert-file: "/custom/cert/path"
+  invalid-indent:
+    - this is not valid yaml
+key-file: "/custom/key/path"
+log-level: "debug"
+console: true
+`
+
+	// Write test config files
+	validConfigFile := filepath.Join(tmpDir, "valid-config.yaml")
+	err = os.WriteFile(validConfigFile, []byte(validConfig), 0644)
 	require.NoError(t, err)
+
+	emptyConfigFile := filepath.Join(tmpDir, "empty-config.yaml")
+	err = os.WriteFile(emptyConfigFile, []byte(emptyConfig), 0644)
+	require.NoError(t, err)
+
+	invalidTypeConfigFile := filepath.Join(tmpDir, "invalid-type-config.yaml")
+	err = os.WriteFile(invalidTypeConfigFile, []byte(invalidTypeConfig), 0644)
+	require.NoError(t, err)
+
+	malformedConfigFile := filepath.Join(tmpDir, "malformed-config.yaml")
+	err = os.WriteFile(malformedConfigFile, []byte(malformedConfig), 0644)
+	require.NoError(t, err)
+
+	nonexistentFile := filepath.Join(tmpDir, "nonexistent.yaml")
 
 	tests := []struct {
 		name       string
@@ -240,10 +276,11 @@ console: true
 		envVars    map[string]string
 		want       *Config
 		wantErr    bool
+		errMsg     string
 	}{
 		{
-			name:       "load from config file",
-			configFile: configFile,
+			name:       "load from valid config file",
+			configFile: validConfigFile,
 			want: &Config{
 				Address:  "127.0.0.1:8443",
 				CertFile: "/custom/cert/path",
@@ -263,6 +300,8 @@ console: true
 			envVars: map[string]string{
 				"WEBHOOK_ADDRESS":   "localhost:8443",
 				"WEBHOOK_LOG_LEVEL": "debug",
+				"WEBHOOK_CERT_FILE": "/etc/webhook/certs/tls.crt",
+				"WEBHOOK_KEY_FILE":  "/etc/webhook/certs/tls.key",
 			},
 			want: &Config{
 				Address:  "localhost:8443",
@@ -271,6 +310,29 @@ console: true
 				LogLevel: "debug",
 				Console:  false,
 			},
+		},
+		{
+			name:       "empty config file loads defaults",
+			configFile: emptyConfigFile,
+			want:       New(),
+		},
+		{
+			name:       "nonexistent config file",
+			configFile: nonexistentFile,
+			wantErr:    true,
+			errMsg:     "error reading config file",
+		},
+		{
+			name:       "invalid type in config file",
+			configFile: invalidTypeConfigFile,
+			wantErr:    true,
+			errMsg:     "error unmarshaling config",
+		},
+		{
+			name:       "malformed config file",
+			configFile: malformedConfigFile,
+			wantErr:    true,
+			errMsg:     "error parsing config",
 		},
 	}
 
@@ -293,6 +355,9 @@ console: true
 			got, err := LoadConfig(tt.configFile)
 			if tt.wantErr {
 				assert.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
+				}
 				return
 			}
 

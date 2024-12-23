@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -131,41 +132,81 @@ func LoadConfig(cfgFile string) (*Config, error) {
 		// Use config file from the flag
 		viper.SetConfigFile(cfgFile)
 		if err := viper.ReadInConfig(); err != nil {
+			if _, ok := err.(viper.ConfigParseError); ok {
+				return nil, fmt.Errorf("error parsing config: %v", err)
+			}
 			return nil, fmt.Errorf("error reading config file: %v", err)
 		}
 		log.Info().Str("config", viper.ConfigFileUsed()).Msg("Using config file")
-	} else {
-		// Search for config in home directory
-		home, err := os.UserHomeDir()
-		if err != nil {
-			log.Error().Err(err).Msg("Error finding home directory")
-		} else {
-			viper.AddConfigPath(home)
-			viper.SetConfigType("yaml")
-			viper.SetConfigName(".webhook")
 
-			// Silently ignore error if default config file is not found
-			if err := viper.ReadInConfig(); err == nil {
-				log.Info().Str("config", viper.ConfigFileUsed()).Msg("Using config file")
+		// Verify types of values in config file
+		if viper.IsSet("address") {
+			if _, ok := viper.Get("address").(string); !ok {
+				return nil, fmt.Errorf("error unmarshaling config: address must be a string")
+			}
+		}
+		if viper.IsSet("cert-file") {
+			if _, ok := viper.Get("cert-file").(string); !ok {
+				return nil, fmt.Errorf("error unmarshaling config: cert-file must be a string")
+			}
+		}
+		if viper.IsSet("key-file") {
+			if _, ok := viper.Get("key-file").(string); !ok {
+				return nil, fmt.Errorf("error unmarshaling config: key-file must be a string")
+			}
+		}
+		if viper.IsSet("log-level") {
+			if _, ok := viper.Get("log-level").(string); !ok {
+				return nil, fmt.Errorf("error unmarshaling config: log-level must be a string")
+			}
+		}
+		if viper.IsSet("console") {
+			rawValue := viper.Get("console")
+			switch rawValue.(type) {
+			case bool:
+				// This is fine
+			case string:
+				if _, err := strconv.ParseBool(rawValue.(string)); err != nil {
+					return nil, fmt.Errorf("error unmarshaling config: console must be a boolean")
+				}
+			default:
+				return nil, fmt.Errorf("error unmarshaling config: console must be a boolean")
 			}
 		}
 	}
 
 	// Update config from viper (will get either environment variables or config file values)
 	if viper.IsSet("address") {
-		config.Address = viper.GetString("address")
+		address := viper.GetString("address")
+		if address != "" {
+			config.Address = address
+		}
 	}
 	if viper.IsSet("cert-file") {
-		config.CertFile = viper.GetString("cert-file")
+		certFile := viper.GetString("cert-file")
+		if certFile != "" {
+			config.CertFile = certFile
+		}
 	}
 	if viper.IsSet("key-file") {
-		config.KeyFile = viper.GetString("key-file")
+		keyFile := viper.GetString("key-file")
+		if keyFile != "" {
+			config.KeyFile = keyFile
+		}
 	}
 	if viper.IsSet("log-level") {
-		config.LogLevel = viper.GetString("log-level")
+		logLevel := viper.GetString("log-level")
+		if logLevel != "" {
+			config.LogLevel = logLevel
+		}
 	}
 	if viper.IsSet("console") {
 		config.Console = viper.GetBool("console")
+	}
+
+	// Validate configuration values after loading
+	if config.Address == "" || config.CertFile == "" || config.KeyFile == "" || config.LogLevel == "" {
+		return nil, fmt.Errorf("error unmarshaling config: missing required fields")
 	}
 
 	return config, nil
