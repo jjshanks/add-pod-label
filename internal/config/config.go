@@ -115,7 +115,9 @@ func LoadConfig(cfgFile string) (*Config, error) {
 	// Bind all config keys at once
 	configKeys := []string{"address", "cert-file", "key-file", "log-level", "console"}
 	for _, key := range configKeys {
-		viper.BindEnv(key)
+		if err := viper.BindEnv(key); err != nil {
+			log.Error().Err(err).Msgf("Failed to bind environment variable for key: %s", key)
+		}
 	}
 
 	if cfgFile != "" {
