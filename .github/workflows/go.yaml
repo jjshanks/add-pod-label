@@ -2,11 +2,11 @@ name: Go
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
 
 permissions: # Explicitly define minimum required permissions
   contents: read
@@ -16,7 +16,7 @@ jobs:
   verify:
     name: Verify and Test
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,18 +25,14 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: "1.21"
           cache: true
-
-      - name: Print commit message
-        run: |
-          echo "Commit message: ${{ github.event.head_commit.message }}"
 
       - name: Install tools
         run: |
           go install golang.org/x/tools/cmd/goimports@latest
           go install mvdan.cc/gofumpt@latest
-      
+
       - name: Verify formatting and imports
         id: verify
         run: |
@@ -70,10 +66,10 @@ jobs:
           git add .
           git commit -m "chore: format Go code"
           git push
-          
+
       - name: Run go vet
         run: go vet ./...
-      
+
       - name: Run tests with coverage
         run: |
           go test -v -race -coverprofile=coverage.out ./...
@@ -89,20 +85,20 @@ jobs:
           if-no-files-found: error
 
   integration-test:
-    name: Integration Tests 
+    name: Integration Tests
     runs-on: ubuntu-latest
     needs: verify
     if: |
       github.actor == 'dependabot[bot]' ||
-      contains(github.event.head_commit.message, 'run-integ-test')
-    
+      contains(github.event.pull_request.body, 'run-integ-test')
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: "1.21"
           cache: true
 
       - name: Set up test environment
@@ -114,7 +110,7 @@ jobs:
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x ./kubectl
           sudo mv ./kubectl /usr/local/bin/kubectl
-      
+
       - name: Run integration tests
         run: make test-integration
         timeout-minutes: 15
@@ -124,14 +120,14 @@ jobs:
     needs: [verify, integration-test]
     runs-on: ubuntu-latest
     if: failure()
-    
+
     steps:
       - name: Determine test scope
         id: test-scope
         run: |
           if [[ "${{ contains(github.event.pull_request.labels.*.name, 'integration-test') || github.actor == 'dependabot[bot]' }}" == "true" ]]; then
             echo "scope=verification, unit tests, and integration tests" >> $GITHUB_OUTPUT
-          else  
+          else
             echo "scope=verification and unit tests" >> $GITHUB_OUTPUT
           fi
 
