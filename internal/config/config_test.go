@@ -145,10 +145,10 @@ func TestConfig_ValidateCertPaths(t *testing.T) {
 	certFile := filepath.Join(tmpDir, "tls.crt")
 	keyFile := filepath.Join(tmpDir, "tls.key")
 
-	err = os.WriteFile(certFile, []byte("test-cert"), 0644)
+	err = os.WriteFile(certFile, []byte("test-cert"), 0o644)
 	require.NoError(t, err)
 
-	err = os.WriteFile(keyFile, []byte("test-key"), 0600)
+	err = os.WriteFile(keyFile, []byte("test-key"), 0o600)
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -191,7 +191,7 @@ func TestConfig_ValidateCertPaths(t *testing.T) {
 				KeyFile:  keyFile,
 			},
 			setupFunc: func() error {
-				return os.Chmod(keyFile, 0644)
+				return os.Chmod(keyFile, 0o644)
 			},
 			wantErr: true,
 			errMsg:  "has excessive permissions",
@@ -231,7 +231,7 @@ log-level: "debug"
 console: true
 `
 	configFile := filepath.Join(tmpDir, "config.yaml")
-	err = os.WriteFile(configFile, []byte(configContent), 0644)
+	err = os.WriteFile(configFile, []byte(configContent), 0o644)
 	require.NoError(t, err)
 
 	tests := []struct {
