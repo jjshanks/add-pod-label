@@ -78,7 +78,6 @@ func (c *Config) InitializeLogging() {
 
 // ValidateCertPaths verifies the certificate and key files
 func (c *Config) ValidateCertPaths() error {
-	// Validate certificate file
 	certInfo, err := os.Stat(c.CertFile)
 	if err != nil {
 		return fmt.Errorf("certificate file error: %v", err)
@@ -87,7 +86,6 @@ func (c *Config) ValidateCertPaths() error {
 		return fmt.Errorf("certificate path is not a regular file")
 	}
 
-	// Validate key file
 	keyInfo, err := os.Stat(c.KeyFile)
 	if err != nil {
 		return fmt.Errorf("key file error: %v", err)
@@ -96,37 +94,20 @@ func (c *Config) ValidateCertPaths() error {
 		return fmt.Errorf("key path is not a regular file")
 	}
 
-	// Check key file permissions
-	keyMode := keyInfo.Mode()
-	if keyMode.Perm()&0o077 != 0 {
-		return fmt.Errorf("key file %s has excessive permissions %v, expected 0600 or more restrictive",
-			c.KeyFile, keyMode.Perm())
+	keyMode := keyInfo.Mode().Perm()
+	if keyMode&0o077 != 0 {
+		return fmt.Errorf("key file %s has excessive permissions %v", c.KeyFile, keyMode)
 	}
-	if keyMode.Perm() > 0o600 {
-		log.Warn().Str("key_file", c.KeyFile).Msgf("key file has permissive mode %v, recommend 0600", keyMode.Perm())
+	if keyMode > 0o600 {
+		log.Warn().Str("key_file", c.KeyFile).Msgf("key file has permissive mode %v", keyMode)
 	}
-
 	return nil
 }
 
 // LoadConfig loads the configuration from viper
 func LoadConfig(cfgFile string) (*Config, error) {
 	config := New()
-
-	// Initialize viper for environment variables first
-	viper.SetEnvPrefix("WEBHOOK")
-	viper.AutomaticEnv()
-
-	// Map environment variables to config fields
-	replacer := strings.NewReplacer("-", "_")
-	viper.SetEnvKeyReplacer(replacer)
-
-	// Bind environment variables
-	viper.BindEnv("address")
-	viper.BindEnv("cert-file")
-	viper.BindEnv("key-file")
-	viper.BindEnv("log-level")
-	viper.BindEnv("console")
+	bindEnvVars()
 
 	if cfgFile != "" {
 		// Use config file from the flag
@@ -212,22 +193,19 @@ func LoadConfig(cfgFile string) (*Config, error) {
 	return config, nil
 }
 
-// InitViper initializes viper with flags and environment variables
-func InitViper(cfgFile string) {
-	// Set the environment variable prefix
+func bindEnvVars() {
 	viper.SetEnvPrefix("WEBHOOK")
-
-	// Enable environment variable binding with replacer for hyphens
-	replacer := strings.NewReplacer("-", "_")
-	viper.SetEnvKeyReplacer(replacer)
-
-	// Enable environment variable binding
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	viper.AutomaticEnv()
 
-	// Explicitly bind each configuration key
-	viper.BindEnv("address")
-	viper.BindEnv("cert-file")
-	viper.BindEnv("key-file")
-	viper.BindEnv("log-level")
-	viper.BindEnv("console")
+	// Bind all config keys at once
+	configKeys := []string{"address", "cert-file", "key-file", "log-level", "console"}
+	for _, key := range configKeys {
+		viper.BindEnv(key)
+	}
+}
+
+// InitViper initializes viper with flags and environment variables
+func InitViper(cfgFile string) {
+	bindEnvVars()
 }

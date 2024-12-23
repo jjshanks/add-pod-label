@@ -197,6 +197,42 @@ func TestConfig_ValidateCertPaths(t *testing.T) {
 			wantErr: true,
 			errMsg:  "has excessive permissions",
 		},
+		{
+			name: "key world readable",
+			config: &Config{
+				CertFile: certFile,
+				KeyFile:  keyFile,
+			},
+			setupFunc: func() error {
+				return os.Chmod(keyFile, 0o604)
+			},
+			wantErr: true,
+			errMsg:  "has excessive permissions",
+		},
+		{
+			name: "key world readable and writable",
+			config: &Config{
+				CertFile: certFile,
+				KeyFile:  keyFile,
+			},
+			setupFunc: func() error {
+				return os.Chmod(keyFile, 0o606)
+			},
+			wantErr: true,
+			errMsg:  "has excessive permissions",
+		},
+		{
+			name: "key group and world readable",
+			config: &Config{
+				CertFile: certFile,
+				KeyFile:  keyFile,
+			},
+			setupFunc: func() error {
+				return os.Chmod(keyFile, 0o644)
+			},
+			wantErr: true,
+			errMsg:  "has excessive permissions",
+		},
 	}
 
 	for _, tt := range tests {
