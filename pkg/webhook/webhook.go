@@ -1,4 +1,3 @@
-// pkg/webhook/webhook.go
 package webhook
 
 import (
@@ -17,6 +16,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+
+	"github.com/jjshanks/pod-label-webhook/internal/config"
 )
 
 var (
@@ -206,9 +207,9 @@ func validateCertPaths(certFile, keyFile string) error {
 	return nil
 }
 
-func Run(config Config) error {
+func Run(cfg *config.Config) error {
 	// Validate certificate paths
-	if err := validateCertPaths(config.CertFile, config.KeyFile); err != nil {
+	if err := cfg.ValidateCertPaths(); err != nil {
 		return fmt.Errorf("certificate validation failed: %v", err)
 	}
 
@@ -216,16 +217,15 @@ func Run(config Config) error {
 	mux.HandleFunc("/mutate", handleMutate)
 
 	server := &http.Server{
-		Addr:              config.Address,
+		Addr:              cfg.Address,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		TLSConfig: &tls.Config{
-			MinVersion: tls.VersionTLS13, // Require TLS 1.3
+			MinVersion: tls.VersionTLS13,
 			CipherSuites: []uint16{
-				// TLS 1.3 cipher suites
 				tls.TLS_AES_128_GCM_SHA256,
 				tls.TLS_AES_256_GCM_SHA384,
 				tls.TLS_CHACHA20_POLY1305_SHA256,
@@ -234,18 +234,18 @@ func Run(config Config) error {
 				tls.X25519,
 				tls.CurveP384,
 			},
-			SessionTicketsDisabled: true,                        // Disable session tickets for perfect forward secrecy
-			Renegotiation:          tls.RenegotiateNever,        // Disable renegotiation
-			InsecureSkipVerify:     false,                       // Never skip certificate verification
-			ClientAuth:             tls.VerifyClientCertIfGiven, // Verify client certs if provided
+			SessionTicketsDisabled: true,
+			Renegotiation:          tls.RenegotiateNever,
+			InsecureSkipVerify:     false,
+			ClientAuth:             tls.VerifyClientCertIfGiven,
 		},
 	}
 
 	log.Info().
-		Str("address", config.Address).
-		Str("cert_file", config.CertFile).
-		Str("key_file", config.KeyFile).
+		Str("address", cfg.Address).
+		Str("cert_file", cfg.CertFile).
+		Str("key_file", cfg.KeyFile).
 		Msg("Starting webhook server")
 
-	return server.ListenAndServeTLS(config.CertFile, config.KeyFile)
+	return server.ListenAndServeTLS(cfg.CertFile, cfg.KeyFile)
 }
