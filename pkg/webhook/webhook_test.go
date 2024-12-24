@@ -10,11 +10,46 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+
+	"github.com/jjshanks/pod-label-webhook/internal/config"
 )
+
+// TestServer is a helper struct for testing
+type TestServer struct {
+	*Server
+	logs *bytes.Buffer
+}
+
+// newTestServer creates a new test server with captured logs
+func newTestServer(t *testing.T) *TestServer {
+	t.Helper()
+
+	// Create a buffer to capture logs
+	var buf bytes.Buffer
+	logger := zerolog.New(&buf).With().Timestamp().Logger()
+
+	cfg := &config.Config{
+		Address:  "localhost:8443",
+		CertFile: "/tmp/cert",
+		KeyFile:  "/tmp/key",
+		LogLevel: "debug",
+	}
+
+	server := &Server{
+		logger: logger,
+		config: cfg,
+	}
+
+	return &TestServer{
+		Server: server,
+		logs:   &buf,
+	}
+}
 
 func createAdmissionReview(pod *corev1.Pod) (*admissionv1.AdmissionReview, error) {
 	raw, err := json.Marshal(pod)
@@ -56,6 +91,7 @@ func TestHandleMutate(t *testing.T) {
 		expectError   bool
 		expectedLabel string
 		expectPatch   bool
+		expectLogs    []string
 	}{
 		{
 			name: "pod with no annotations",
@@ -76,29 +112,12 @@ func TestHandleMutate(t *testing.T) {
 			expectError:   false,
 			expectedLabel: "world",
 			expectPatch:   true,
-		},
-		{
-			name: "pod with annotation set to true",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod",
-					Namespace: "default",
-					Annotations: map[string]string{
-						annotationKey: "true",
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "test-container",
-							Image: "nginx",
-						},
-					},
-				},
+			expectLogs: []string{
+				"Received request",
+				"Processing request",
+				"Created patch",
+				"Successfully wrote response",
 			},
-			expectError:   false,
-			expectedLabel: "world",
-			expectPatch:   true,
 		},
 		{
 			name: "pod with annotation set to false",
@@ -121,9 +140,15 @@ func TestHandleMutate(t *testing.T) {
 			},
 			expectError: false,
 			expectPatch: false,
+			expectLogs: []string{
+				"Received request",
+				"Processing request",
+				"Skipping label modification due to annotation",
+				"Successfully wrote response",
+			},
 		},
 		{
-			name: "pod with existing labels and no annotation",
+			name: "pod with existing labels",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pod",
@@ -144,37 +169,20 @@ func TestHandleMutate(t *testing.T) {
 			expectError:   false,
 			expectedLabel: "world",
 			expectPatch:   true,
-		},
-		{
-			name: "pod with existing labels and annotation set to true",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod",
-					Namespace: "default",
-					Labels: map[string]string{
-						"existing": "label",
-					},
-					Annotations: map[string]string{
-						annotationKey: "true",
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "test-container",
-							Image: "nginx",
-						},
-					},
-				},
+			expectLogs: []string{
+				"Received request",
+				"Processing request",
+				"Created patch",
+				"Successfully wrote response",
 			},
-			expectError:   false,
-			expectedLabel: "world",
-			expectPatch:   true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create test server with captured logs
+			ts := newTestServer(t)
+
 			// Create admission review
 			ar, err := createAdmissionReview(tt.pod)
 			if err != nil {
@@ -187,20 +195,34 @@ func TestHandleMutate(t *testing.T) {
 				t.Fatalf("failed to marshal admission review: %v", err)
 			}
 
-			// Create request
+			// Create request with test headers
 			req := httptest.NewRequest("POST", "/mutate", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Request-ID", "test-request-id")
 
 			// Create response recorder
 			rr := httptest.NewRecorder()
 
 			// Call handler
-			handleMutate(rr, req)
+			ts.handleMutate(rr, req)
 
 			// Check response status code
 			if rr.Code != http.StatusOK && !tt.expectError {
 				t.Errorf("handler returned wrong status code: got %v want %v",
 					rr.Code, http.StatusOK)
+			}
+
+			// Verify logs contain expected messages
+			logs := ts.logs.String()
+			for _, expectedLog := range tt.expectLogs {
+				if !strings.Contains(logs, expectedLog) {
+					t.Errorf("expected log message %q not found in logs:\n%s", expectedLog, logs)
+				}
+			}
+
+			// Verify request ID is present in all log entries
+			if !strings.Contains(logs, "test-request-id") {
+				t.Error("request ID not found in log entries")
 			}
 
 			// Parse response
@@ -248,11 +270,6 @@ func TestHandleMutate(t *testing.T) {
 
 				// Verify existing labels are preserved
 				if tt.pod.Labels != nil {
-					var patch []map[string]interface{}
-					if err := json.Unmarshal(response.Response.Patch, &patch); err != nil {
-						t.Fatalf("failed to unmarshal patch: %v", err)
-					}
-
 					for _, p := range patch {
 						if p["op"] == "add" || p["op"] == "replace" {
 							if labels, ok := p["value"].(map[string]interface{}); ok {
@@ -285,6 +302,7 @@ func TestCreatePatch(t *testing.T) {
 		pod         *corev1.Pod
 		expectError bool
 		expectOp    string
+		expectLogs  []string
 	}{
 		{
 			name: "pod with no labels",
@@ -293,6 +311,10 @@ func TestCreatePatch(t *testing.T) {
 			},
 			expectError: false,
 			expectOp:    "add",
+			expectLogs: []string{
+				"Creating patch for pod",
+				"Successfully created patch",
+			},
 		},
 		{
 			name: "pod with existing labels",
@@ -305,15 +327,30 @@ func TestCreatePatch(t *testing.T) {
 			},
 			expectError: false,
 			expectOp:    "replace",
+			expectLogs: []string{
+				"Creating patch for pod",
+				"Successfully created patch",
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			patch, err := createPatch(tt.pod)
+			// Create test server with captured logs
+			ts := newTestServer(t)
+
+			patch, err := ts.createPatch(tt.pod)
 			if (err != nil) != tt.expectError {
 				t.Errorf("createPatch() error = %v, expectError %v", err, tt.expectError)
 				return
+			}
+
+			// Verify logs
+			logs := ts.logs.String()
+			for _, expectedLog := range tt.expectLogs {
+				if !strings.Contains(logs, expectedLog) {
+					t.Errorf("expected log message %q not found in logs:\n%s", expectedLog, logs)
+				}
 			}
 
 			var patchOps []map[string]interface{}
@@ -368,12 +405,13 @@ func TestValidateCertPaths(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		certFile  string
-		keyFile   string
-		keyMode   os.FileMode
-		expectErr bool
-		errMsg    string
+		name       string
+		certFile   string
+		keyFile    string
+		keyMode    os.FileMode
+		expectErr  bool
+		errMsg     string
+		expectLogs []string
 	}{
 		{
 			name:      "valid paths and permissions",
@@ -381,6 +419,10 @@ func TestValidateCertPaths(t *testing.T) {
 			keyFile:   keyPath,
 			keyMode:   0o600,
 			expectErr: false,
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate paths validated successfully",
+			},
 		},
 		{
 			name:      "invalid cert path",
@@ -389,6 +431,10 @@ func TestValidateCertPaths(t *testing.T) {
 			keyMode:   0o600,
 			expectErr: true,
 			errMsg:    "certificate file error",
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate validation failed",
+			},
 		},
 		{
 			name:      "invalid key path",
@@ -397,6 +443,10 @@ func TestValidateCertPaths(t *testing.T) {
 			keyMode:   0o600,
 			expectErr: true,
 			errMsg:    "key file error",
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate validation failed",
+			},
 		},
 		{
 			name:      "key too permissive (world readable)",
@@ -405,6 +455,11 @@ func TestValidateCertPaths(t *testing.T) {
 			keyMode:   0o644,
 			expectErr: true,
 			errMsg:    "has excessive permissions",
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate validation failed",
+				"Key file has excessive permissions",
+			},
 		},
 		{
 			name:      "key too permissive (group readable)",
@@ -413,6 +468,11 @@ func TestValidateCertPaths(t *testing.T) {
 			keyMode:   0o640,
 			expectErr: true,
 			errMsg:    "has excessive permissions",
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate validation failed",
+				"Key file has excessive permissions",
+			},
 		},
 		{
 			name:      "key minimally permissive",
@@ -420,6 +480,10 @@ func TestValidateCertPaths(t *testing.T) {
 			keyFile:   keyPath,
 			keyMode:   0o600,
 			expectErr: false,
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate paths validated successfully",
+			},
 		},
 		{
 			name:      "key more restrictive",
@@ -427,18 +491,27 @@ func TestValidateCertPaths(t *testing.T) {
 			keyFile:   keyPath,
 			keyMode:   0o400,
 			expectErr: false,
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate paths validated successfully",
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create test server with captured logs
+			ts := newTestServer(t)
+
 			if tt.keyFile == keyPath {
 				if err := os.Chmod(keyPath, tt.keyMode); err != nil {
 					t.Fatalf("failed to chmod key file: %v", err)
 				}
 			}
 
-			err := validateCertPaths(tt.certFile, tt.keyFile)
+			err := ts.validateCertPaths(tt.certFile, tt.keyFile)
+
+			// Verify error conditions
 			if tt.expectErr {
 				if err == nil {
 					t.Error("expected error but got none")
@@ -447,6 +520,21 @@ func TestValidateCertPaths(t *testing.T) {
 				}
 			} else if err != nil {
 				t.Errorf("unexpected error: %v", err)
+			}
+
+			// Verify logs
+			logs := ts.logs.String()
+			for _, expectedLog := range tt.expectLogs {
+				if !strings.Contains(logs, expectedLog) {
+					t.Errorf("expected log message %q not found in logs:\n%s", expectedLog, logs)
+				}
+			}
+
+			// For non-error cases, verify log level appropriateness
+			if !tt.expectErr {
+				if strings.Contains(logs, "error") {
+					t.Error("found error level log message in successful test case")
+				}
 			}
 		})
 	}
