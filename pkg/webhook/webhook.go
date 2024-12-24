@@ -20,6 +20,8 @@ import (
 	"github.com/jjshanks/pod-label-webhook/internal/config"
 )
 
+const annotationKey = "pod-label-webhook.jjshanks.github.com/add-hello-world"
+
 var (
 	runtimeScheme = runtime.NewScheme()
 	codecs        = serializer.NewCodecFactory(runtimeScheme)
@@ -44,7 +46,13 @@ type patchOperation struct {
 }
 
 func createPatch(pod *corev1.Pod) ([]byte, error) {
-	var patch []patchOperation
+	// Check annotation
+	if val, ok := pod.Annotations[annotationKey]; ok {
+		// If annotation is present and set to "false", don't add label
+		if val == "false" {
+			return json.Marshal([]patchOperation{})
+		}
+	}
 
 	// Create a new labels map that includes both existing labels and our new label
 	labels := make(map[string]string)
@@ -57,21 +65,19 @@ func createPatch(pod *corev1.Pod) ([]byte, error) {
 
 	// If there are no existing labels, use "add" operation
 	if pod.Labels == nil {
-		patch = []patchOperation{{
+		return json.Marshal([]patchOperation{{
 			Op:    "add",
 			Path:  "/metadata/labels",
 			Value: labels,
-		}}
-	} else {
-		// If labels exist, use "replace" operation
-		patch = []patchOperation{{
-			Op:    "replace",
-			Path:  "/metadata/labels",
-			Value: labels,
-		}}
+		}})
 	}
 
-	return json.Marshal(patch)
+	// If labels exist, use "replace" operation
+	return json.Marshal([]patchOperation{{
+		Op:    "replace",
+		Path:  "/metadata/labels",
+		Value: labels,
+	}})
 }
 
 func handleMutate(w http.ResponseWriter, r *http.Request) {

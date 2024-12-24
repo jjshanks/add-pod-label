@@ -1,18 +1,45 @@
 # Pod Label Webhook
 
-A Kubernetes admission webhook that automatically adds labels to pods during creation.
+A Kubernetes admission webhook that automatically adds labels to pods during creation, with configurable behavior via annotations.
 
 ## Overview
 
-This webhook intercepts pod creation requests in Kubernetes and adds a "hello: world" label to all pods. It's built using the Kubernetes admission webhook framework and can be deployed as a standalone service in your cluster.
+This webhook intercepts pod creation requests in Kubernetes and adds a "hello: world" label to pods unless explicitly disabled via annotation. It's built using the Kubernetes admission webhook framework and can be deployed as a standalone service in your cluster.
 
 ## Features
 
 - Automatically labels pods during creation
+- Configurable behavior using annotations
 - Secure TLS communication using cert-manager
 - Configurable logging levels and formats
 - Kubernetes native deployment
 - Multi-architecture support (amd64, arm64)
+
+## Usage
+
+By default, the webhook adds a "hello: world" label to all pods. This behavior can be controlled using the following annotation:
+
+```yaml
+pod-label-webhook.jjshanks.github.com/add-hello-world: "false"
+```
+
+Example deployment with labeling disabled:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    metadata:
+      annotations:
+        pod-label-webhook.jjshanks.github.com/add-hello-world: "false"
+    spec:
+      containers:
+        - name: nginx
+          image: nginx
+```
 
 ## Prerequisites
 
@@ -28,18 +55,21 @@ This webhook intercepts pod creation requests in Kubernetes and adds a "hello: w
 ### Local Development
 
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/jjshanks/pod-label-webhook.git
 cd pod-label-webhook
 ```
 
 2. Build and run tests:
+
 ```bash
 make build
 make test
 ```
 
 3. Run integration tests:
+
 ```bash
 make test-integration
 ```
@@ -54,6 +84,7 @@ kubectl apply -f manifests/
 ```
 
 Pre-built images are available from GitHub Container Registry:
+
 ```bash
 ghcr.io/jjshanks/pod-label-webhook:latest
 ```
@@ -62,16 +93,17 @@ ghcr.io/jjshanks/pod-label-webhook:latest
 
 The webhook supports the following configuration options:
 
-| Flag | Environment Variable | Default | Description |
-|------|---------------------|---------|-------------|
-| --address | WEBHOOK_ADDRESS | 0.0.0.0:8443 | The address to listen on |
-| --log-level | WEBHOOK_LOG_LEVEL | info | Log level (trace, debug, info, warn, error, fatal, panic) |
-| --console | WEBHOOK_CONSOLE | false | Use console log format instead of JSON |
-| --config | - | $HOME/.webhook.yaml | Path to config file |
+| Flag        | Environment Variable | Default             | Description                                               |
+| ----------- | -------------------- | ------------------- | --------------------------------------------------------- |
+| --address   | WEBHOOK_ADDRESS      | 0.0.0.0:8443        | The address to listen on                                  |
+| --log-level | WEBHOOK_LOG_LEVEL    | info                | Log level (trace, debug, info, warn, error, fatal, panic) |
+| --console   | WEBHOOK_CONSOLE      | false               | Use console log format instead of JSON                    |
+| --config    | -                    | $HOME/.webhook.yaml | Path to config file                                       |
 
 ## Development
 
 ### Project Structure
+
 ```
 ├── pkg/webhook/      # Core webhook implementation
 │   ├── cmd/         # Command line interface
@@ -96,12 +128,16 @@ The webhook supports the following configuration options:
 ### Integration Tests
 
 Integration tests use shell scripts to create a Kind cluster, deploy the webhook, and verify its functionality. The tests:
+
 1. Create a Kind cluster with cert-manager
 2. Build and deploy the webhook
-3. Create a test deployment
-4. Verify the webhook adds the expected label
+3. Create test deployments with and without the annotation
+4. Verify the webhook correctly handles both cases:
+   - Adds label when annotation is absent or true
+   - Skips label when annotation is false
 
 Integration tests can be triggered in pull requests by:
+
 1. Adding the 'integration-test' label to the PR
 2. Including '#integ-test' in any commit message
 3. Including '#integ-test' in the PR title
@@ -112,11 +148,12 @@ Integration tests can be triggered in pull requests by:
 Releases are automated using GitHub Actions. To create a new release:
 
 1. Create and push a new tag following semantic versioning:
+
    ```bash
    git tag v1.0.0
    git push origin v1.0.0
    ```
-   
+
 2. The release workflow will automatically:
    - Build multi-architecture binaries
    - Create Docker images
