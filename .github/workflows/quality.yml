@@ -2,23 +2,24 @@ name: Quality
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
 
 permissions:
   contents: write # Required for pushing format fixes
   security-events: write # Required for uploading code scanning results
-  pull-requests: write  # Required for pushing format fixes
-  
+  pull-requests: write # Required for pushing format fixes
+  checks: write
+
 jobs:
   quality:
     name: Code Quality
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,60 +28,31 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: "1.23"
           cache: true
-
-      - name: Install tools
-        run: |
-          go install golang.org/x/tools/cmd/goimports@latest
-          go install mvdan.cc/gofumpt@latest
-      
-      - name: Verify formatting and imports
-        id: verify
-        run: |
-          # Run format check
-          NEEDS_FORMAT=false
-          find . -name '*.go' -type f -print0 | xargs -0 gofumpt -l > fmt.out
-          if [ -s fmt.out ]; then
-            echo "Some files need formatting"
-            NEEDS_FORMAT=true
-            find . -name '*.go' -type f -print0 | xargs -0 gofumpt -w
-          fi
-          echo "needs_formatting=$NEEDS_FORMAT" >> $GITHUB_OUTPUT
-
-          # Run imports check
-          NEEDS_IMPORTS=false
-          find . -name '*.go' -type f -print0 | xargs -0 goimports -l > imports.out
-          if [ -s imports.out ]; then
-            echo "Some files need import organization"
-            NEEDS_IMPORTS=true
-            find . -name '*.go' -type f -print0 | xargs -0 goimports -w
-          fi
-          echo "needs_organization=$NEEDS_IMPORTS" >> $GITHUB_OUTPUT
-
-      - name: Commit changes if needed
-        if: steps.verify.outputs.needs_formatting == 'true' || steps.verify.outputs.needs_organization == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add .
-          git commit -m "chore: format Go code"
-          git fetch origin
-          git push origin HEAD:${BRANCH_NAME}
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          args: --timeout=5m
+          args: --timeout=5m --fix
           only-new-issues: true
           working-directory: ./pkg
 
+      - name: Commit changes
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git config --global user.name 'GitHub Actions'
+            git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+            git add -A
+            git commit -m "chore: apply linter fixes"
+            git push
+          else
+            echo "No changes to commit"
+          fi
+
       - name: YAML lint
-        uses: ibiqlik/action-yamllint@v3.1 
+        uses: ibiqlik/action-yamllint@v3.1
         with:
           file_or_dir: tests/manifests/
           config_file: .yamllint.yml

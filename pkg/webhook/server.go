@@ -8,8 +8,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jjshanks/pod-label-webhook/internal/config"
 	"github.com/rs/zerolog"
+
+	"github.com/jjshanks/pod-label-webhook/internal/config"
 )
 
 type Server struct {
