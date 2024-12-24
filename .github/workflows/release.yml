@@ -5,16 +5,16 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version (e.g., v1.2.3, v1.2.3-beta.1, v1.2.3+meta.4)'
+        description: "Version (e.g., v1.2.3, v1.2.3-beta.1, v1.2.3+meta.4)"
         required: true
         type: string
       prerelease:
-        description: 'Is this a prerelease?'
+        description: "Is this a prerelease?"
         required: false
         type: boolean
         default: false
   push:
-    tags: [ 'v*.*.*' ]
+    tags: ["v*.*.*"]
 
 permissions:
   contents: write # Required for creating releases
@@ -29,7 +29,7 @@ jobs:
       - name: Check version format
         run: |
           VERSION="${{ github.event.inputs.version }}"
-          
+
           # Check if version starts with 'v'
           if [[ ! "$VERSION" =~ ^v ]]; then
             echo "Error: Version must start with 'v'"
@@ -41,10 +41,10 @@ jobs:
             echo "  - v1.2.3+meta (release with build metadata)"
             exit 1
           fi
-          
+
           # Remove 'v' prefix for semver validation
           VERSION_WITHOUT_V="${VERSION#v}"
-          
+
           # Semver regex that supports pre-release and build metadata
           SEMVER_REGEX="^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+([0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*))?$"
           if ! echo "$VERSION_WITHOUT_V" | grep -E "$SEMVER_REGEX"; then
@@ -96,7 +96,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: "1.23"
           cache: true # Enable Go modules cache
 
       - name: Login to GHCR
@@ -122,7 +122,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser # Use OSS version of GoReleaser
-          version: '~> v2'
+          version: "~> v2"
           args: release --clean # Clean before building
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -141,7 +141,7 @@ jobs:
             } else {
               tag = context.ref.replace('refs/tags/', '');
             }
-            
+
             // Wait for the release to be available
             let release;
             for (let i = 0; i < 5; i++) {
@@ -158,10 +158,10 @@ jobs:
                 await new Promise(resolve => setTimeout(resolve, 5000));
               }
             }
-            
+
             // Add documentation link to release notes
             const releaseNotes = `## ${tag}\n\n${release.data.body}\n\n---\n\nFor installation instructions and documentation, please visit our [documentation](docs/README.md).`;
-            
+
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,

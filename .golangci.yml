@@ -13,7 +13,7 @@ linters:
 run:
   timeout: 5m
   tests: true
-  go: '1.21'
+  go: "1.23"
 
 linters-settings:
   goimports:

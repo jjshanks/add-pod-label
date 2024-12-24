@@ -33,7 +33,11 @@ var (
 			if err != nil {
 				return err
 			}
-			return webhook.Run(cfg)
+			server, err := webhook.NewServer(cfg)
+			if err != nil {
+				return err
+			}
+			return server.Run()
 		},
 	}
 )
