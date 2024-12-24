@@ -19,3 +19,27 @@ spec:
         - name: integ-test
           image: busybox
           command: ["sh", "-c", "sleep infinity"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: integ-test-no-label
+  namespace: default
+  labels:
+    app: integ-test-no-label
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: integ-test-no-label
+  template:
+    metadata:
+      labels:
+        app: integ-test-no-label
+      annotations:
+        pod-label-webhook.jjshanks.github.com/add-hello-world: "false"
+    spec:
+      containers:
+        - name: integ-test-no-label
+          image: busybox
+          command: ["sh", "-c", "sleep infinity"]

@@ -55,9 +55,10 @@ func TestHandleMutate(t *testing.T) {
 		pod           *corev1.Pod
 		expectError   bool
 		expectedLabel string
+		expectPatch   bool
 	}{
 		{
-			name: "pod with no labels",
+			name: "pod with no annotations",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pod",
@@ -74,9 +75,55 @@ func TestHandleMutate(t *testing.T) {
 			},
 			expectError:   false,
 			expectedLabel: "world",
+			expectPatch:   true,
 		},
 		{
-			name: "pod with existing labels",
+			name: "pod with annotation set to true",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Annotations: map[string]string{
+						annotationKey: "true",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "test-container",
+							Image: "nginx",
+						},
+					},
+				},
+			},
+			expectError:   false,
+			expectedLabel: "world",
+			expectPatch:   true,
+		},
+		{
+			name: "pod with annotation set to false",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Annotations: map[string]string{
+						annotationKey: "false",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "test-container",
+							Image: "nginx",
+						},
+					},
+				},
+			},
+			expectError: false,
+			expectPatch: false,
+		},
+		{
+			name: "pod with existing labels and no annotation",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pod",
@@ -96,6 +143,33 @@ func TestHandleMutate(t *testing.T) {
 			},
 			expectError:   false,
 			expectedLabel: "world",
+			expectPatch:   true,
+		},
+		{
+			name: "pod with existing labels and annotation set to true",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Labels: map[string]string{
+						"existing": "label",
+					},
+					Annotations: map[string]string{
+						annotationKey: "true",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "test-container",
+							Image: "nginx",
+						},
+					},
+				},
+			},
+			expectError:   false,
+			expectedLabel: "world",
+			expectPatch:   true,
 		},
 	}
 
@@ -123,7 +197,7 @@ func TestHandleMutate(t *testing.T) {
 			// Call handler
 			handleMutate(rr, req)
 
-			// Check response
+			// Check response status code
 			if rr.Code != http.StatusOK && !tt.expectError {
 				t.Errorf("handler returned wrong status code: got %v want %v",
 					rr.Code, http.StatusOK)
@@ -145,26 +219,61 @@ func TestHandleMutate(t *testing.T) {
 				t.Error("handler returned not allowed")
 			}
 
-			// Verify patch
-			var patch []map[string]interface{}
-			if err := json.Unmarshal(response.Response.Patch, &patch); err != nil {
-				t.Fatalf("failed to unmarshal patch: %v", err)
-			}
+			if tt.expectPatch {
+				// Verify patch contains the label modification
+				var patch []map[string]interface{}
+				if err := json.Unmarshal(response.Response.Patch, &patch); err != nil {
+					t.Fatalf("failed to unmarshal patch: %v", err)
+				}
 
-			// Check that hello=world label is in the patch
-			found := false
-			for _, p := range patch {
-				if p["op"] == "add" || p["op"] == "replace" {
-					if labels, ok := p["value"].(map[string]interface{}); ok {
-						if val, ok := labels["hello"]; ok && val == tt.expectedLabel {
-							found = true
-							break
+				if len(patch) == 0 {
+					t.Error("expected patch but got none")
+					return
+				}
+
+				found := false
+				for _, p := range patch {
+					if p["op"] == "add" || p["op"] == "replace" {
+						if labels, ok := p["value"].(map[string]interface{}); ok {
+							if val, ok := labels["hello"]; ok && val == tt.expectedLabel {
+								found = true
+								break
+							}
 						}
 					}
 				}
-			}
-			if !found {
-				t.Error("patch does not contain expected label")
+				if !found {
+					t.Error("patch does not contain expected label")
+				}
+
+				// Verify existing labels are preserved
+				if tt.pod.Labels != nil {
+					var patch []map[string]interface{}
+					if err := json.Unmarshal(response.Response.Patch, &patch); err != nil {
+						t.Fatalf("failed to unmarshal patch: %v", err)
+					}
+
+					for _, p := range patch {
+						if p["op"] == "add" || p["op"] == "replace" {
+							if labels, ok := p["value"].(map[string]interface{}); ok {
+								for k, v := range tt.pod.Labels {
+									if val, ok := labels[k]; !ok || val != v {
+										t.Errorf("patch is missing or has wrong value for existing label %s=%s", k, v)
+									}
+								}
+							}
+						}
+					}
+				}
+			} else {
+				// Verify no patch or empty patch when not expected
+				var patch []map[string]interface{}
+				if err := json.Unmarshal(response.Response.Patch, &patch); err != nil {
+					t.Fatalf("failed to unmarshal patch: %v", err)
+				}
+				if len(patch) > 0 {
+					t.Error("expected no patch but got one")
+				}
 			}
 		})
 	}
