@@ -106,7 +106,7 @@ The webhook supports the following configuration options:
 
 ```
 ├── pkg/webhook/      # Core webhook implementation
-│   ├── cmd/         # Command line interface
+│   ├── cmd/         # Command Line Interface
 │   ├── webhook.go   # Main webhook logic
 │   └── *_test.go    # Tests
 ├── tests/           # Test resources
