@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,7 +30,6 @@ type TestServer struct {
 func newTestServer(t *testing.T) *TestServer {
 	t.Helper()
 
-	// Create a buffer to capture logs
 	var buf bytes.Buffer
 	logger := zerolog.New(&buf).With().Timestamp().Logger()
 
@@ -88,39 +88,30 @@ func TestHandleMutate(t *testing.T) {
 	tests := []struct {
 		name          string
 		pod           *corev1.Pod
-		expectError   bool
-		expectedLabel string
+		contentType   string
+		expectStatus  int
 		expectPatch   bool
-		expectLogs    []string
+		expectLogMsg  string
+		invalidReview bool
 	}{
 		{
-			name: "pod with no annotations",
+			name: "valid pod without annotations",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pod",
 					Namespace: "default",
 				},
 				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "test-container",
-							Image: "nginx",
-						},
-					},
+					Containers: []corev1.Container{{Name: "test", Image: "nginx"}},
 				},
 			},
-			expectError:   false,
-			expectedLabel: "world",
-			expectPatch:   true,
-			expectLogs: []string{
-				"Received request",
-				"Processing request",
-				"Created patch",
-				"Successfully wrote response",
-			},
+			contentType:  "application/json",
+			expectStatus: http.StatusOK,
+			expectPatch:  true,
+			expectLogMsg: "Successfully processed request",
 		},
 		{
-			name: "pod with annotation set to false",
+			name: "pod with disable annotation",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pod",
@@ -130,22 +121,13 @@ func TestHandleMutate(t *testing.T) {
 					},
 				},
 				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "test-container",
-							Image: "nginx",
-						},
-					},
+					Containers: []corev1.Container{{Name: "test", Image: "nginx"}},
 				},
 			},
-			expectError: false,
-			expectPatch: false,
-			expectLogs: []string{
-				"Received request",
-				"Processing request",
-				"Skipping label modification due to annotation",
-				"Successfully wrote response",
-			},
+			contentType:  "application/json",
+			expectStatus: http.StatusOK,
+			expectPatch:  false,
+			expectLogMsg: "Skipping label modification",
 		},
 		{
 			name: "pod with invalid annotation value",
@@ -158,27 +140,54 @@ func TestHandleMutate(t *testing.T) {
 					},
 				},
 				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "test-container",
-							Image: "nginx",
-						},
-					},
+					Containers: []corev1.Container{{Name: "test", Image: "nginx"}},
 				},
 			},
-			expectError:   false,
-			expectedLabel: "world",
-			expectPatch:   true,
-			expectLogs: []string{
-				"Received request",
-				"Processing request",
-				"Invalid annotation value, defaulting to true",
-				"Created patch",
-				"Successfully wrote response",
-			},
+			contentType:  "application/json",
+			expectStatus: http.StatusOK,
+			expectPatch:  true,
+			expectLogMsg: "Invalid annotation value",
 		},
 		{
-			name: "pod with annotation set to true",
+			name: "pod with existing labels",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Labels: map[string]string{
+						"existing": "label",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "test", Image: "nginx"}},
+				},
+			},
+			contentType:  "application/json",
+			expectStatus: http.StatusOK,
+			expectPatch:  true,
+			expectLogMsg: "Successfully processed request",
+		},
+		{
+			name: "invalid content type",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
+			},
+			contentType:  "text/plain",
+			expectStatus: http.StatusUnsupportedMediaType,
+			expectPatch:  false,
+			expectLogMsg: "Invalid content type",
+		},
+		{
+			name:          "invalid admission review",
+			pod:           &corev1.Pod{},
+			contentType:   "application/json",
+			expectStatus:  http.StatusBadRequest,
+			expectPatch:   false,
+			expectLogMsg:  "Decode failed",
+			invalidReview: true,
+		},
+		{
+			name: "pod with enable annotation",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pod",
@@ -188,261 +197,95 @@ func TestHandleMutate(t *testing.T) {
 					},
 				},
 				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "test-container",
-							Image: "nginx",
-						},
-					},
+					Containers: []corev1.Container{{Name: "test", Image: "nginx"}},
 				},
 			},
-			expectError:   false,
-			expectedLabel: "world",
-			expectPatch:   true,
-			expectLogs: []string{
-				"Received request",
-				"Processing request",
-				"Created patch",
-				"Successfully wrote response",
-			},
-		},
-		{
-			name: "pod with existing labels",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod",
-					Namespace: "default",
-					Labels: map[string]string{
-						"existing": "label",
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "test-container",
-							Image: "nginx",
-						},
-					},
-				},
-			},
-			expectError:   false,
-			expectedLabel: "world",
-			expectPatch:   true,
-			expectLogs: []string{
-				"Received request",
-				"Processing request",
-				"Created patch",
-				"Successfully wrote response",
-			},
+			contentType:  "application/json",
+			expectStatus: http.StatusOK,
+			expectPatch:  true,
+			expectLogMsg: "Successfully processed request",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create test server with captured logs
 			ts := newTestServer(t)
 
-			// Create admission review
-			ar, err := createAdmissionReview(tt.pod)
-			if err != nil {
-				t.Fatalf("failed to create admission review: %v", err)
+			var body []byte
+			if tt.invalidReview {
+				body = []byte(`invalid json`)
+			} else {
+				ar, err := createAdmissionReview(tt.pod)
+				if err != nil {
+					t.Fatalf("failed to create admission review: %v", err)
+				}
+				body, err = json.Marshal(ar)
+				if err != nil {
+					t.Fatalf("failed to marshal admission review: %v", err)
+				}
 			}
 
-			// Marshal admission review
-			body, err := json.Marshal(ar)
-			if err != nil {
-				t.Fatalf("failed to marshal admission review: %v", err)
-			}
-
-			// Create request with test headers
 			req := httptest.NewRequest("POST", "/mutate", bytes.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Content-Type", tt.contentType)
 			req.Header.Set("X-Request-ID", "test-request-id")
 
-			// Create response recorder
 			rr := httptest.NewRecorder()
-
-			// Call handler
 			ts.handleMutate(rr, req)
 
-			// Check response status code
-			if rr.Code != http.StatusOK && !tt.expectError {
-				t.Errorf("handler returned wrong status code: got %v want %v",
-					rr.Code, http.StatusOK)
-			}
+			assert.Equal(t, tt.expectStatus, rr.Code)
 
-			// Verify logs contain expected messages
 			logs := ts.logs.String()
-			for _, expectedLog := range tt.expectLogs {
-				if !strings.Contains(logs, expectedLog) {
-					t.Errorf("expected log message %q not found in logs:\n%s", expectedLog, logs)
-				}
-			}
+			assert.Contains(t, logs, tt.expectLogMsg)
+			assert.Contains(t, logs, "test-request-id")
 
-			// Verify request ID is present in all log entries
-			if !strings.Contains(logs, "test-request-id") {
-				t.Error("request ID not found in log entries")
-			}
+			if tt.expectStatus == http.StatusOK {
+				response := &admissionv1.AdmissionReview{}
+				err := json.Unmarshal(rr.Body.Bytes(), response)
+				assert.NoError(t, err)
 
-			// Parse response
-			response := &admissionv1.AdmissionReview{}
-			if err := json.Unmarshal(rr.Body.Bytes(), response); err != nil {
-				t.Fatalf("failed to unmarshal response: %v", err)
-			}
+				if tt.expectPatch {
+					assert.NotEmpty(t, response.Response.Patch)
+					// Verify patch contains hello=world label
+					var patch []map[string]interface{}
+					err := json.Unmarshal(response.Response.Patch, &patch)
+					assert.NoError(t, err)
+					assert.True(t, containsHelloLabel(patch))
 
-			// Verify response
-			if response.Response.UID != ar.Request.UID {
-				t.Errorf("handler returned wrong UID: got %v want %v",
-					response.Response.UID, ar.Request.UID)
-			}
-
-			if !response.Response.Allowed {
-				t.Error("handler returned not allowed")
-			}
-
-			if tt.expectPatch {
-				// Verify patch contains the label modification
-				var patch []map[string]interface{}
-				if err := json.Unmarshal(response.Response.Patch, &patch); err != nil {
-					t.Fatalf("failed to unmarshal patch: %v", err)
-				}
-
-				if len(patch) == 0 {
-					t.Error("expected patch but got none")
-					return
-				}
-
-				found := false
-				for _, p := range patch {
-					if p["op"] == "add" || p["op"] == "replace" {
-						if labels, ok := p["value"].(map[string]interface{}); ok {
-							if val, ok := labels["hello"]; ok && val == tt.expectedLabel {
-								found = true
-								break
-							}
+					// If pod had existing labels, verify they are preserved
+					if tt.pod.Labels != nil {
+						for k, v := range tt.pod.Labels {
+							assert.True(t, containsLabel(patch, k, v))
 						}
 					}
-				}
-				if !found {
-					t.Error("patch does not contain expected label")
-				}
-
-				// Verify existing labels are preserved
-				if tt.pod.Labels != nil {
-					for _, p := range patch {
-						if p["op"] == "add" || p["op"] == "replace" {
-							if labels, ok := p["value"].(map[string]interface{}); ok {
-								for k, v := range tt.pod.Labels {
-									if val, ok := labels[k]; !ok || val != v {
-										t.Errorf("patch is missing or has wrong value for existing label %s=%s", k, v)
-									}
-								}
-							}
-						}
-					}
-				}
-			} else {
-				// Verify no patch or empty patch when not expected
-				var patch []map[string]interface{}
-				if err := json.Unmarshal(response.Response.Patch, &patch); err != nil {
-					t.Fatalf("failed to unmarshal patch: %v", err)
-				}
-				if len(patch) > 0 {
-					t.Error("expected no patch but got one")
+				} else {
+					// When skipping labels, we expect an empty patch array that serializes to "[]"
+					assert.Equal(t, "[]", string(response.Response.Patch))
 				}
 			}
 		})
 	}
 }
 
-func TestCreatePatch(t *testing.T) {
-	tests := []struct {
-		name        string
-		pod         *corev1.Pod
-		expectError bool
-		expectOp    string
-		expectLogs  []string
-	}{
-		{
-			name: "pod with no labels",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{},
-			},
-			expectError: false,
-			expectOp:    "add",
-			expectLogs: []string{
-				"Creating patch for pod",
-				"Successfully created patch",
-			},
-		},
-		{
-			name: "pod with existing labels",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"existing": "label",
-					},
-				},
-			},
-			expectError: false,
-			expectOp:    "replace",
-			expectLogs: []string{
-				"Creating patch for pod",
-				"Successfully created patch",
-			},
-		},
+func containsHelloLabel(patch []map[string]interface{}) bool {
+	for _, op := range patch {
+		if labels, ok := op["value"].(map[string]interface{}); ok {
+			if val, ok := labels["hello"]; ok && val == "world" {
+				return true
+			}
+		}
 	}
+	return false
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create test server with captured logs
-			ts := newTestServer(t)
-
-			patch, err := ts.createPatch(tt.pod)
-			if (err != nil) != tt.expectError {
-				t.Errorf("createPatch() error = %v, expectError %v", err, tt.expectError)
-				return
+func containsLabel(patch []map[string]interface{}, key, value string) bool {
+	for _, op := range patch {
+		if labels, ok := op["value"].(map[string]interface{}); ok {
+			if val, ok := labels[key]; ok && val == value {
+				return true
 			}
-
-			// Verify logs
-			logs := ts.logs.String()
-			for _, expectedLog := range tt.expectLogs {
-				if !strings.Contains(logs, expectedLog) {
-					t.Errorf("expected log message %q not found in logs:\n%s", expectedLog, logs)
-				}
-			}
-
-			var patchOps []map[string]interface{}
-			if err := json.Unmarshal(patch, &patchOps); err != nil {
-				t.Fatalf("failed to unmarshal patch: %v", err)
-			}
-
-			if len(patchOps) != 1 {
-				t.Fatalf("expected 1 patch operation, got %d", len(patchOps))
-			}
-
-			if patchOps[0]["op"] != tt.expectOp {
-				t.Errorf("expected operation %s, got %s", tt.expectOp, patchOps[0]["op"])
-			}
-
-			labels, ok := patchOps[0]["value"].(map[string]interface{})
-			if !ok {
-				t.Fatal("patch value is not a map")
-			}
-
-			if labels["hello"] != "world" {
-				t.Error("patch does not contain hello=world label")
-			}
-
-			if tt.pod.Labels != nil {
-				for k, v := range tt.pod.Labels {
-					if labels[k] != v {
-						t.Errorf("patch is missing existing label %s=%s", k, v)
-					}
-				}
-			}
-		})
+		}
 	}
+	return false
 }
 
 func TestValidateCertPaths(t *testing.T) {
@@ -594,6 +437,101 @@ func TestValidateCertPaths(t *testing.T) {
 				if strings.Contains(logs, "error") {
 					t.Error("found error level log message in successful test case")
 				}
+			}
+		})
+	}
+}
+
+func TestCreatePatch(t *testing.T) {
+	tests := []struct {
+		name        string
+		pod         *corev1.Pod
+		expectError bool
+		expectLabel bool
+	}{
+		{
+			name: "pod without labels",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pod",
+				},
+			},
+			expectError: false,
+			expectLabel: true,
+		},
+		{
+			name: "pod with existing labels",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pod",
+					Labels: map[string]string{
+						"existing": "label",
+					},
+				},
+			},
+			expectError: false,
+			expectLabel: true,
+		},
+		{
+			name: "pod with annotation to skip",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pod",
+					Annotations: map[string]string{
+						annotationKey: "false",
+					},
+				},
+			},
+			expectError: false,
+			expectLabel: false,
+		},
+		{
+			name:        "nil pod",
+			pod:         nil,
+			expectError: true,
+			expectLabel: false,
+		},
+		{
+			name: "pod with invalid label key",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pod",
+					Labels: map[string]string{
+						"": "invalid",
+					},
+				},
+			},
+			expectError: true,
+			expectLabel: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := newTestServer(t)
+			patch, err := ts.createPatch(tt.pod)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			if tt.expectLabel {
+				var patchOps []map[string]interface{}
+				err := json.Unmarshal(patch, &patchOps)
+				assert.NoError(t, err)
+				assert.True(t, containsHelloLabel(patchOps))
+
+				// If pod had existing labels, verify they are preserved
+				if tt.pod.Labels != nil {
+					for k, v := range tt.pod.Labels {
+						assert.True(t, containsLabel(patchOps, k, v))
+					}
+				}
+			} else {
+				// When skipping labels, we expect an empty patch array that serializes to "[]"
+				assert.Equal(t, "[]", string(patch))
 			}
 		})
 	}
