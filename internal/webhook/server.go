@@ -53,7 +53,7 @@ func (s *Server) Run() error {
 		Str("key_file", s.config.KeyFile).
 		Msg("Starting webhook server")
 
-		// Validate certificate paths
+	// Validate certificate paths
 	if err := s.config.ValidateCertPaths(); err != nil {
 		return fmt.Errorf("certificate validation failed: %v", err)
 	}
@@ -86,12 +86,6 @@ func (s *Server) Run() error {
 		},
 	}
 
-	s.logger.Info().
-		Str("address", s.config.Address).
-		Str("cert_file", s.config.CertFile).
-		Str("key_file", s.config.KeyFile).
-		Msg("Starting webhook server")
-
 	return server.ListenAndServeTLS(s.config.CertFile, s.config.KeyFile)
 }
 
@@ -102,7 +96,7 @@ func (s *Server) validateCertPaths(certFile, keyFile string) error {
 	certInfo, err := os.Stat(certFile)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("Certificate validation failed")
-		return fmt.Errorf("certificate file error: %v", err)
+		return fmt.Errorf("certificate file error: %w", err)
 	}
 	if !certInfo.Mode().IsRegular() {
 		s.logger.Error().Msg("Certificate validation failed")
@@ -113,7 +107,7 @@ func (s *Server) validateCertPaths(certFile, keyFile string) error {
 	keyInfo, err := os.Stat(keyFile)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("Certificate validation failed")
-		return fmt.Errorf("key file error: %v", err)
+		return fmt.Errorf("key file error: %w", err)
 	}
 	if !keyInfo.Mode().IsRegular() {
 		s.logger.Error().Msg("Certificate validation failed")
@@ -145,7 +139,7 @@ func (s *Server) validateCertPaths(certFile, keyFile string) error {
 	certDirInfo, err := os.Stat(certDir)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("Certificate validation failed")
-		return fmt.Errorf("certificate directory error: %v", err)
+		return fmt.Errorf("certificate directory error: %w", err)
 	}
 	if !certDirInfo.IsDir() {
 		s.logger.Error().Msg("Certificate validation failed")
@@ -155,7 +149,7 @@ func (s *Server) validateCertPaths(certFile, keyFile string) error {
 	keyDirInfo, err := os.Stat(keyDir)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("Certificate validation failed")
-		return fmt.Errorf("key directory error: %v", err)
+		return fmt.Errorf("key directory error: %w", err)
 	}
 	if !keyDirInfo.IsDir() {
 		s.logger.Error().Msg("Certificate validation failed")
