@@ -54,27 +54,43 @@ func (s *Server) shouldAddLabel(pod *corev1.Pod) bool {
 }
 
 func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
+	if pod == nil {
+		return nil, &WebhookError{
+			Op:  "validate",
+			Err: fmt.Errorf("pod is nil"),
+		}
+	}
+
 	s.logger.Debug().
 		Str("pod", pod.Name).
 		Str("namespace", pod.Namespace).
 		Bool("has_labels", pod.Labels != nil).
 		Bool("has_hello_annotation", pod.Annotations != nil && pod.Annotations[annotationKey] != "").
-		Msg("Creating patch for pod")
+		Msg("Creating patch")
 
 	if !s.shouldAddLabel(pod) {
-		s.logger.Debug().Str("pod", pod.Name).Msg("Skipping label modification due to annotation")
+		s.logger.Debug().
+			Str("pod", pod.Name).
+			Msg("Skipping label modification due to annotation")
 		return json.Marshal([]patchOperation{})
 	}
 
-	// Create a new labels map that includes both existing labels and our new label
+	// Create labels map with validation
 	labels := make(map[string]string)
 	if pod.Labels != nil {
 		for k, v := range pod.Labels {
+			if k == "" {
+				return nil, newValidationError(
+					fmt.Errorf("empty label key found"),
+					fmt.Sprintf("pod/%s", pod.Name),
+				)
+			}
 			labels[k] = v
 		}
 	}
 	labels["hello"] = "world"
 
+	// Create patch operations with validation
 	var patch []patchOperation
 	if pod.Labels == nil {
 		patch = []patchOperation{{
@@ -90,9 +106,13 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 		}}
 	}
 
+	// Marshal patch with error context
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal patch: %w", err)
+		return nil, newPatchError(
+			fmt.Errorf("failed to marshal patch: %w", err),
+			fmt.Sprintf("pod/%s", pod.Name),
+		)
 	}
 
 	s.logger.Debug().Msg("Successfully created patch")
@@ -100,7 +120,7 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 }
 
 func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
-	// Create request-scoped logger with request ID
+	// Get request ID for error context
 	reqID := r.Header.Get("X-Request-ID")
 	if reqID == "" {
 		reqID = uuid.New().String()
@@ -111,58 +131,65 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 		Str("handler", "mutate").
 		Logger()
 
-	logger.Debug().
-		Str("method", r.Method).
-		Str("url", r.URL.String()).
-		Str("remote_addr", r.RemoteAddr).
-		Msg("Received request")
-
+	// Read request body with error context
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		logger.Error().Err(err).Msg("Failed to read request body")
-		http.Error(w, "error reading body", http.StatusBadRequest)
+		err = fmt.Errorf("failed to read request body: %w", err)
+		logger.Error().Err(err).Msg("Request read failed")
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	// Validate content type with specific error
 	if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
-		logger.Error().Str("content-type", contentType).Msg("Wrong content type")
-		http.Error(w, "invalid Content-Type, expected 'application/json'", http.StatusUnsupportedMediaType)
+		err := fmt.Errorf("invalid Content-Type %q, expected 'application/json'", contentType)
+		logger.Error().Err(err).Str("content_type", contentType).Msg("Invalid content type")
+		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 		return
 	}
 
+	// Decode admission review with structured error
 	admissionReview := &admissionv1.AdmissionReview{}
 	if _, _, err := deserializer.Decode(body, nil, admissionReview); err != nil {
-		logger.Error().Err(err).Msg("Error decoding admission review")
-		http.Error(w, fmt.Sprintf("error decoding: %v", err), http.StatusBadRequest)
+		err = newDecodeError(err, "admission review")
+		logger.Error().Err(err).Msg("Decode failed")
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	request := admissionReview.Request
 	if request == nil {
-		logger.Error().Msg("Admission review request is nil")
-		http.Error(w, "admission review request is nil", http.StatusBadRequest)
+		err := &WebhookError{
+			Op:  "validate",
+			Err: fmt.Errorf("admission review request is nil"),
+		}
+		logger.Error().Err(err).Msg("Validation failed")
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	// Add request UID to logger context
 	logger = logger.With().Str("uid", string(request.UID)).Logger()
-	logger.Debug().Msg("Processing request")
 
+	// Unmarshal pod with context
 	pod := &corev1.Pod{}
 	if err := json.Unmarshal(request.Object.Raw, pod); err != nil {
-		logger.Error().Err(err).Msg("Error unmarshaling pod")
-		http.Error(w, fmt.Sprintf("error unmarshaling pod: %v", err), http.StatusBadRequest)
+		err = newDecodeError(err, fmt.Sprintf("pod/%s", pod.Name))
+		logger.Error().Err(err).Msg("Pod unmarshal failed")
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	// Create patch with error wrapping
 	patchBytes, err := s.createPatch(pod)
 	if err != nil {
-		logger.Error().Err(err).Msg("Error creating patch")
-		http.Error(w, fmt.Sprintf("error creating patch: %v", err), http.StatusInternalServerError)
+		err = newPatchError(err, fmt.Sprintf("pod/%s", pod.Name))
+		logger.Error().Err(err).Msg("Patch creation failed")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	logger.Debug().RawJSON("patch", patchBytes).Msg("Created patch")
-
+	// Build and send response with error handling
 	patchType := admissionv1.PatchTypeJSONPatch
 	response := &admissionv1.AdmissionReview{
 		TypeMeta: metav1.TypeMeta{
@@ -179,17 +206,17 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 
 	respBytes, err := json.Marshal(response)
 	if err != nil {
-		logger.Error().Err(err).Msg("Error marshaling response")
-		http.Error(w, fmt.Sprintf("error marshaling response: %v", err), http.StatusInternalServerError)
+		err = fmt.Errorf("failed to marshal response: %w", err)
+		logger.Error().Err(err).Msg("Response marshal failed")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	logger.Debug().RawJSON("response", respBytes).Msg("Sending response")
-
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write(respBytes); err != nil {
-		logger.Error().Err(err).Msg("Error writing response")
-	} else {
-		logger.Debug().Msg("Successfully wrote response")
+		logger.Error().Err(err).Msg("Failed to write response")
+		return
 	}
+
+	logger.Debug().Msg("Successfully processed request")
 }
