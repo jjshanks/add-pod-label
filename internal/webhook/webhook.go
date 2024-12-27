@@ -57,8 +57,8 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 	s.logger.Debug().
 		Str("pod", pod.Name).
 		Str("namespace", pod.Namespace).
-		Interface("labels", pod.Labels).
-		Interface("annotations", pod.Annotations).
+		Bool("has_labels", pod.Labels != nil).
+		Bool("has_hello_annotation", pod.Annotations != nil && pod.Annotations[annotationKey] != "").
 		Msg("Creating patch for pod")
 
 	if !s.shouldAddLabel(pod) {
