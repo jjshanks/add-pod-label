@@ -1,5 +1,12 @@
 # Pod Label Webhook
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/jjshanks/add-pod-label)](https://goreportcard.com/report/github.com/jjshanks/add-pod-label)
+[![Go](https://github.com/jjshanks/add-pod-label/workflows/Go/badge.svg)](https://github.com/jjshanks/add-pod-label/actions?query=workflow%3AGo)
+[![Quality](https://github.com/jjshanks/add-pod-label/workflows/Quality/badge.svg)](https://github.com/jjshanks/add-pod-label/actions?query=workflow%3AQuality)
+[![Security](https://github.com/jjshanks/add-pod-label/workflows/Security/badge.svg)](https://github.com/jjshanks/add-pod-label/actions?query=workflow%3ASecurity)
+[![Release](https://github.com/jjshanks/add-pod-label/workflows/Release/badge.svg)](https://github.com/jjshanks/add-pod-label/actions?query=workflow%3ARelease)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A Kubernetes admission webhook that automatically adds labels to pods during creation, with configurable behavior via annotations.
 
 ## Overview
