@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -283,6 +286,160 @@ func containsLabel(patch []map[string]interface{}, key, value string) bool {
 		}
 	}
 	return false
+}
+
+func TestValidateCertPaths(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "webhook-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create test files
+	certPath := filepath.Join(tmpDir, "tls.crt")
+	keyPath := filepath.Join(tmpDir, "tls.key")
+
+	if err := os.WriteFile(certPath, []byte("test-cert"), 0o644); err != nil {
+		t.Fatalf("failed to create test cert: %v", err)
+	}
+	if err := os.WriteFile(keyPath, []byte("test-key"), 0o600); err != nil {
+		t.Fatalf("failed to create test key: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		certFile   string
+		keyFile    string
+		keyMode    os.FileMode
+		expectErr  bool
+		errMsg     string
+		expectLogs []string
+	}{
+		{
+			name:      "valid paths and permissions",
+			certFile:  certPath,
+			keyFile:   keyPath,
+			keyMode:   0o600,
+			expectErr: false,
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate paths validated successfully",
+			},
+		},
+		{
+			name:      "invalid cert path",
+			certFile:  "/nonexistent/cert",
+			keyFile:   keyPath,
+			keyMode:   0o600,
+			expectErr: true,
+			errMsg:    "certificate file error",
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate validation failed",
+			},
+		},
+		{
+			name:      "invalid key path",
+			certFile:  certPath,
+			keyFile:   "/nonexistent/key",
+			keyMode:   0o600,
+			expectErr: true,
+			errMsg:    "key file error",
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate validation failed",
+			},
+		},
+		{
+			name:      "key too permissive (world readable)",
+			certFile:  certPath,
+			keyFile:   keyPath,
+			keyMode:   0o644,
+			expectErr: true,
+			errMsg:    "has excessive permissions",
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate validation failed",
+				"Key file has excessive permissions",
+			},
+		},
+		{
+			name:      "key too permissive (group readable)",
+			certFile:  certPath,
+			keyFile:   keyPath,
+			keyMode:   0o640,
+			expectErr: true,
+			errMsg:    "has excessive permissions",
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate validation failed",
+				"Key file has excessive permissions",
+			},
+		},
+		{
+			name:      "key minimally permissive",
+			certFile:  certPath,
+			keyFile:   keyPath,
+			keyMode:   0o600,
+			expectErr: false,
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate paths validated successfully",
+			},
+		},
+		{
+			name:      "key more restrictive",
+			certFile:  certPath,
+			keyFile:   keyPath,
+			keyMode:   0o400,
+			expectErr: false,
+			expectLogs: []string{
+				"Validating certificate paths",
+				"Certificate paths validated successfully",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test server with captured logs
+			ts := newTestServer(t)
+
+			if tt.keyFile == keyPath {
+				if err := os.Chmod(keyPath, tt.keyMode); err != nil {
+					t.Fatalf("failed to chmod key file: %v", err)
+				}
+			}
+
+			err := ts.validateCertPaths(tt.certFile, tt.keyFile)
+
+			// Verify error conditions
+			if tt.expectErr {
+				if err == nil {
+					t.Error("expected error but got none")
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("expected error containing %q but got %v", tt.errMsg, err)
+				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			// Verify logs
+			logs := ts.logs.String()
+			for _, expectedLog := range tt.expectLogs {
+				if !strings.Contains(logs, expectedLog) {
+					t.Errorf("expected log message %q not found in logs:\n%s", expectedLog, logs)
+				}
+			}
+
+			// For non-error cases, verify log level appropriateness
+			if !tt.expectErr {
+				if strings.Contains(logs, "error") {
+					t.Error("found error level log message in successful test case")
+				}
+			}
+		})
+	}
 }
 
 func TestCreatePatch(t *testing.T) {
