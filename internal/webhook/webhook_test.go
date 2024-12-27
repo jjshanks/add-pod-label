@@ -148,6 +148,65 @@ func TestHandleMutate(t *testing.T) {
 			},
 		},
 		{
+			name: "pod with invalid annotation value",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Annotations: map[string]string{
+						annotationKey: "invalid",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "test-container",
+							Image: "nginx",
+						},
+					},
+				},
+			},
+			expectError:   false,
+			expectedLabel: "world",
+			expectPatch:   true,
+			expectLogs: []string{
+				"Received request",
+				"Processing request",
+				"Invalid annotation value, defaulting to true",
+				"Created patch",
+				"Successfully wrote response",
+			},
+		},
+		{
+			name: "pod with annotation set to true",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Annotations: map[string]string{
+						annotationKey: "true",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "test-container",
+							Image: "nginx",
+						},
+					},
+				},
+			},
+			expectError:   false,
+			expectedLabel: "world",
+			expectPatch:   true,
+			expectLogs: []string{
+				"Received request",
+				"Processing request",
+				"Created patch",
+				"Successfully wrote response",
+			},
+		},
+		{
 			name: "pod with existing labels",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{

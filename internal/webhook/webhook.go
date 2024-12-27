@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/google/uuid"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -33,16 +34,36 @@ type patchOperation struct {
 	Value interface{} `json:"value,omitempty"`
 }
 
-func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
-	s.logger.Debug().Msg("Creating patch for pod")
+func (s *Server) shouldAddLabel(pod *corev1.Pod) bool {
+	val, ok := pod.Annotations[annotationKey]
+	if !ok {
+		return true
+	}
 
-	// Check annotation
-	if val, ok := pod.Annotations[annotationKey]; ok {
-		// If annotation is present and set to "false", don't add label
-		if val == "false" {
-			s.logger.Debug().Msg("Skipping label modification due to annotation")
-			return json.Marshal([]patchOperation{})
-		}
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		s.logger.Warn().
+			Str("value", val).
+			Str("pod", pod.Name).
+			Str("namespace", pod.Namespace).
+			Msg("Invalid annotation value, defaulting to true")
+		return true
+	}
+
+	return parsed
+}
+
+func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
+	s.logger.Debug().
+		Str("pod", pod.Name).
+		Str("namespace", pod.Namespace).
+		Bool("has_labels", pod.Labels != nil).
+		Bool("has_hello_annotation", pod.Annotations != nil && pod.Annotations[annotationKey] != "").
+		Msg("Creating patch for pod")
+
+	if !s.shouldAddLabel(pod) {
+		s.logger.Debug().Str("pod", pod.Name).Msg("Skipping label modification due to annotation")
+		return json.Marshal([]patchOperation{})
 	}
 
 	// Create a new labels map that includes both existing labels and our new label
@@ -54,31 +75,28 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 	}
 	labels["hello"] = "world"
 
-	var patch []byte
-	var err error
-
-	// If there are no existing labels, use "add" operation
+	var patch []patchOperation
 	if pod.Labels == nil {
-		patch, err = json.Marshal([]patchOperation{{
+		patch = []patchOperation{{
 			Op:    "add",
 			Path:  "/metadata/labels",
 			Value: labels,
-		}})
+		}}
 	} else {
-		// If labels exist, use "replace" operation
-		patch, err = json.Marshal([]patchOperation{{
+		patch = []patchOperation{{
 			Op:    "replace",
 			Path:  "/metadata/labels",
 			Value: labels,
-		}})
+		}}
 	}
 
+	patchBytes, err := json.Marshal(patch)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal patch: %w", err)
 	}
 
 	s.logger.Debug().Msg("Successfully created patch")
-	return patch, nil
+	return patchBytes, nil
 }
 
 func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
