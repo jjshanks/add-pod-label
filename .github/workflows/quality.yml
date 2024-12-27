@@ -37,7 +37,7 @@ jobs:
           version: latest
           args: --timeout=5m --fix
           only-new-issues: true
-          working-directory: ./pkg
+          working-directory: .
 
       - name: Commit changes
         run: |

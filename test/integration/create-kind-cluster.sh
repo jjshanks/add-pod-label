@@ -9,7 +9,7 @@ NAMESPACE=${NAMESPACE:-webhook-test}
 echo "Creating kind cluster: ${CLUSTER_NAME}"
 
 # Create kind cluster using external config
-kind create cluster --name "${CLUSTER_NAME}" --config tests/manifests/kind-config.yaml
+kind create cluster --name "${CLUSTER_NAME}" --config test/e2e/manifests/kind-config.yaml
 
 echo "Installing cert-manager..."
 

@@ -5,14 +5,14 @@ set -euo pipefail
 # Cleanup function
 cleanup() {
     echo "Cleaning up test resources..."
-    kubectl delete -f tests/manifests/test-deployment.yaml --ignore-not-found
+    kubectl delete -f test/e2e/manifests/test-deployment.yaml --ignore-not-found
 }
 
 # Set up cleanup on script exit
 trap cleanup EXIT
 
 echo "Applying test deployments..."
-kubectl apply -f tests/manifests/test-deployment.yaml
+kubectl apply -f test/e2e/manifests/test-deployment.yaml
 
 echo "Waiting for deployments to be available..."
 kubectl wait --for=condition=Available --timeout=60s -n default deployment/integ-test

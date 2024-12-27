@@ -13,11 +13,11 @@ test:
 
 # Run integration tests
 test-integration:
-	trap './scripts/delete-kind-cluster.sh' EXIT; \
-	./scripts/create-kind-cluster.sh && \
+	trap './test/integration/delete-kind-cluster.sh' EXIT; \
+	./test/integration/create-kind-cluster.sh && \
 	$(MAKE) build && \
-	./scripts/kind-deploy.sh && \
-	./scripts/integ-test.sh
+	./test/integration/kind-deploy.sh && \
+	./test/integration/integ-test.sh
 
 # Clean build artifacts
 clean:

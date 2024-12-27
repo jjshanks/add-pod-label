@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jjshanks/pod-label-webhook/internal/config"
-	"github.com/jjshanks/pod-label-webhook/pkg/webhook"
+	"github.com/jjshanks/pod-label-webhook/internal/webhook"
 )
 
 var (
