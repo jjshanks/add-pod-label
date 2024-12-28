@@ -107,6 +107,47 @@ The webhook supports the following configuration options:
 | --console   | WEBHOOK_CONSOLE      | false               | Use console log format instead of JSON                    |
 | --config    | -                    | $HOME/.webhook.yaml | Path to config file                                       |
 
+## Health Monitoring
+
+The webhook implements health checks via HTTP endpoints:
+
+- **Liveness Probe** (`/healthz`): Verifies the server is responsive
+
+  - Returns 200 OK if the server is alive
+  - Returns 503 if no successful health check in the last 60 seconds
+  - Used by Kubernetes to determine if the pod should be restarted
+
+- **Readiness Probe** (`/readyz`): Verifies the server is ready to handle requests
+  - Returns 200 OK if the server is ready to handle requests
+  - Returns 503 if the server is starting up or not ready
+  - Used by Kubernetes to determine if traffic should be sent to the pod
+
+The probes are configured with the following default settings:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8443
+    scheme: HTTPS
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 8443
+    scheme: HTTPS
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+```
+
+You can customize these settings by modifying the deployment manifest.
+
 ## Development
 
 ### Project Structure
@@ -132,24 +173,6 @@ The webhook supports the following configuration options:
 - `make lint-yaml` - Run YAML linting
 - `make verify` - Run all checks (linting and tests)
 
-### Integration Tests
-
-Integration tests use shell scripts to create a Kind cluster, deploy the webhook, and verify its functionality. The tests:
-
-1. Create a Kind cluster with cert-manager
-2. Build and deploy the webhook
-3. Create test deployments with and without the annotation
-4. Verify the webhook correctly handles both cases:
-   - Adds label when annotation is absent or true
-   - Skips label when annotation is false
-
-Integration tests can be triggered in pull requests by:
-
-1. Adding the 'integration-test' label to the PR
-2. Including '#integ-test' in any commit message
-3. Including '#integ-test' in the PR title
-4. Automatically for Dependabot PRs
-
 ### Release Process
 
 Releases are automated using GitHub Actions. To create a new release:
@@ -168,6 +191,10 @@ Releases are automated using GitHub Actions. To create a new release:
    - Push images to GitHub Container Registry
 
 Alternatively, you can trigger a manual release through the GitHub Actions UI.
+
+### Tests
+
+Please see [TESTING.md](TESTING.md)
 
 ## Contributing
 
