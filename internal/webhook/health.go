@@ -54,6 +54,12 @@ func (h *healthState) timeSinceLastCheck() time.Duration {
 }
 
 func (s *Server) handleLiveness(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	timeSinceLastCheck := s.health.timeSinceLastCheck()
 
 	// Check if too much time has passed since last successful health check
@@ -73,6 +79,12 @@ func (s *Server) handleLiveness(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	if !s.health.isReady() {
 		log.Warn().Msg("Readiness check failed: server not ready")
 		http.Error(w, "Server not ready", http.StatusServiceUnavailable)

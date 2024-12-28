@@ -79,20 +79,56 @@ func TestHealthEndpoints(t *testing.T) {
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	tests := []struct {
-		name           string
-		endpoint       string
-		setupFn        func(*Server, *mockClock)
-		expectedStatus int
-		expectedBody   string
+		name            string
+		endpoint        string
+		method          string
+		setupFn         func(*Server, *mockClock)
+		expectedStatus  int
+		expectedBody    string
+		expectedHeaders map[string]string
 	}{
 		{
 			name:     "liveness probe succeeds",
 			endpoint: "/healthz",
+			method:   http.MethodGet,
 			setupFn: func(s *Server, clock *mockClock) {
 				s.health.updateLastChecked()
 			},
 			expectedStatus: http.StatusOK,
 			expectedBody:   "OK",
+		},
+		{
+			name:           "post to liveness returns method not allowed",
+			endpoint:       "/healthz",
+			method:         http.MethodPost,
+			setupFn:        nil,
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectedBody:   "Method not allowed\n",
+			expectedHeaders: map[string]string{
+				"Allow": http.MethodGet,
+			},
+		},
+		{
+			name:           "put to liveness returns method not allowed",
+			endpoint:       "/healthz",
+			method:         http.MethodPut,
+			setupFn:        nil,
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectedBody:   "Method not allowed\n",
+			expectedHeaders: map[string]string{
+				"Allow": http.MethodGet,
+			},
+		},
+		{
+			name:           "delete to liveness returns method not allowed",
+			endpoint:       "/healthz",
+			method:         http.MethodDelete,
+			setupFn:        nil,
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectedBody:   "Method not allowed\n",
+			expectedHeaders: map[string]string{
+				"Allow": http.MethodGet,
+			},
 		},
 		{
 			name:     "liveness probe fails due to timeout",
@@ -106,11 +142,45 @@ func TestHealthEndpoints(t *testing.T) {
 		{
 			name:     "readiness probe succeeds",
 			endpoint: "/readyz",
+			method:   http.MethodGet,
 			setupFn: func(s *Server, clock *mockClock) {
 				s.health.markReady()
 			},
 			expectedStatus: http.StatusOK,
 			expectedBody:   "OK",
+		},
+		{
+			name:           "post to readiness returns method not allowed",
+			endpoint:       "/readyz",
+			method:         http.MethodPost,
+			setupFn:        nil,
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectedBody:   "Method not allowed\n",
+			expectedHeaders: map[string]string{
+				"Allow": http.MethodGet,
+			},
+		},
+		{
+			name:           "put to readiness returns method not allowed",
+			endpoint:       "/readyz",
+			method:         http.MethodPut,
+			setupFn:        nil,
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectedBody:   "Method not allowed\n",
+			expectedHeaders: map[string]string{
+				"Allow": http.MethodGet,
+			},
+		},
+		{
+			name:           "delete to readiness returns method not allowed",
+			endpoint:       "/readyz",
+			method:         http.MethodDelete,
+			setupFn:        nil,
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectedBody:   "Method not allowed\n",
+			expectedHeaders: map[string]string{
+				"Allow": http.MethodGet,
+			},
 		},
 		{
 			name:           "readiness probe fails when not ready",
@@ -130,7 +200,11 @@ func TestHealthEndpoints(t *testing.T) {
 				tt.setupFn(srv, clock)
 			}
 
-			req := httptest.NewRequest("GET", tt.endpoint, nil)
+			method := tt.method
+			if method == "" {
+				method = http.MethodGet
+			}
+			req := httptest.NewRequest(method, tt.endpoint, nil)
 			w := httptest.NewRecorder()
 
 			switch tt.endpoint {
@@ -142,6 +216,12 @@ func TestHealthEndpoints(t *testing.T) {
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
 			assert.Equal(t, tt.expectedBody, w.Body.String())
+
+			if tt.expectedHeaders != nil {
+				for k, v := range tt.expectedHeaders {
+					assert.Equal(t, v, w.Header().Get(k))
+				}
+			}
 		})
 	}
 }
