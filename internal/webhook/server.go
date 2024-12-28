@@ -5,18 +5,18 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	"github.com/jjshanks/pod-label-webhook/internal/config"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog"
 )
 
 type Server struct {
-	logger zerolog.Logger
-	config *config.Config
-	health *healthState
+	logger  zerolog.Logger
+	config  *config.Config
+	health  *healthState
+	metrics *metrics
 }
 
 func NewServer(cfg *config.Config) (*Server, error) {
@@ -41,10 +41,45 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		})
 	}
 
+	// Initialize metrics with default registry
+	m, err := initMetrics(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize metrics: %w", err)
+	}
+
 	return &Server{
-		logger: logger,
-		config: cfg,
-		health: newHealthState(realClock{}),
+		logger:  logger,
+		config:  cfg,
+		health:  newHealthState(realClock{}),
+		metrics: m,
+	}, nil
+}
+
+func NewTestServer(cfg *config.Config, reg prometheus.Registerer) (*Server, error) {
+	// Create base logger with common fields
+	logger := zerolog.New(os.Stdout).With().
+		Timestamp().
+		Str("service", "pod-label-webhook").
+		Logger()
+
+	// Configure log level
+	level, err := zerolog.ParseLevel(cfg.LogLevel)
+	if err != nil {
+		return nil, fmt.Errorf("invalid log level: %w", err)
+	}
+	logger = logger.Level(level)
+
+	// Initialize metrics with provided registry
+	m, err := initMetrics(reg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize metrics: %w", err)
+	}
+
+	return &Server{
+		logger:  logger,
+		config:  cfg,
+		health:  newHealthState(realClock{}),
+		metrics: m,
 	}, nil
 }
 
@@ -62,13 +97,17 @@ func (s *Server) Run() error {
 
 	mux := http.NewServeMux()
 
-	// Add handlers for webhook and health endpoints
-	mux.HandleFunc("/mutate", s.handleMutate)
-	mux.HandleFunc("/healthz", s.handleLiveness)
-	mux.HandleFunc("/readyz", s.handleReadiness)
+	// Wrap handlers with metrics middleware
+	mux.Handle("/mutate", s.metrics.metricsMiddleware(http.HandlerFunc(s.handleMutate)))
+	mux.Handle("/healthz", s.metrics.metricsMiddleware(http.HandlerFunc(s.handleLiveness)))
+	mux.Handle("/readyz", s.metrics.metricsMiddleware(http.HandlerFunc(s.handleReadiness)))
+
+	// Add metrics endpoint
+	mux.Handle("/metrics", s.metrics.handler())
 
 	// Mark the server as ready after all handlers are set up
 	s.health.markReady()
+	s.metrics.updateHealthMetrics(true, true)
 
 	server := &http.Server{
 		Addr:              s.config.Address,
@@ -96,75 +135,4 @@ func (s *Server) Run() error {
 	}
 
 	return server.ListenAndServeTLS(s.config.CertFile, s.config.KeyFile)
-}
-
-func (s *Server) validateCertPaths(certFile, keyFile string) error {
-	s.logger.Debug().Msg("Validating certificate paths")
-
-	// Validate certificate file
-	certInfo, err := os.Stat(certFile)
-	if err != nil {
-		s.logger.Error().Err(err).Msg("Certificate validation failed")
-		return fmt.Errorf("certificate file error: %w", err)
-	}
-	if !certInfo.Mode().IsRegular() {
-		s.logger.Error().Msg("Certificate validation failed")
-		return fmt.Errorf("certificate path is not a regular file")
-	}
-
-	// Validate key file
-	keyInfo, err := os.Stat(keyFile)
-	if err != nil {
-		s.logger.Error().Err(err).Msg("Certificate validation failed")
-		return fmt.Errorf("key file error: %w", err)
-	}
-	if !keyInfo.Mode().IsRegular() {
-		s.logger.Error().Msg("Certificate validation failed")
-		return fmt.Errorf("key path is not a regular file")
-	}
-
-	// Check key file permissions
-	keyMode := keyInfo.Mode()
-	if keyMode.Perm()&0o077 != 0 {
-		s.logger.Error().
-			Str("key_file", keyFile).
-			Str("mode", keyMode.String()).
-			Msg("Key file has excessive permissions")
-		s.logger.Error().Msg("Certificate validation failed")
-		return fmt.Errorf("key file %s has excessive permissions %v, expected 0600 or more restrictive",
-			keyFile, keyMode.Perm())
-	}
-	if keyMode.Perm() > 0o600 {
-		s.logger.Warn().
-			Str("key_file", keyFile).
-			Str("mode", keyMode.String()).
-			Msg("key file has permissive mode %v, recommend 0600")
-	}
-
-	// Validate parent directories
-	certDir := filepath.Dir(certFile)
-	keyDir := filepath.Dir(keyFile)
-
-	certDirInfo, err := os.Stat(certDir)
-	if err != nil {
-		s.logger.Error().Err(err).Msg("Certificate validation failed")
-		return fmt.Errorf("certificate directory error: %w", err)
-	}
-	if !certDirInfo.IsDir() {
-		s.logger.Error().Msg("Certificate validation failed")
-		return fmt.Errorf("certificate parent path is not a directory")
-	}
-
-	keyDirInfo, err := os.Stat(keyDir)
-	if err != nil {
-		s.logger.Error().Err(err).Msg("Certificate validation failed")
-		return fmt.Errorf("key directory error: %w", err)
-	}
-	if !keyDirInfo.IsDir() {
-		s.logger.Error().Msg("Certificate validation failed")
-		return fmt.Errorf("key parent path is not a directory")
-	}
-
-	s.logger.Debug().Msg("Certificate paths validated successfully")
-	return nil
 }

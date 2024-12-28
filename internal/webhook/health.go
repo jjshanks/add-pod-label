@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
-
-	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -61,10 +59,14 @@ func (s *Server) handleLiveness(w http.ResponseWriter, r *http.Request) {
 	}
 
 	timeSinceLastCheck := s.health.timeSinceLastCheck()
+	isAlive := timeSinceLastCheck <= livenessTimeout
+
+	// Update metrics
+	s.metrics.updateHealthMetrics(s.health.isReady(), isAlive)
 
 	// Check if too much time has passed since last successful health check
-	if timeSinceLastCheck > livenessTimeout {
-		log.Error().
+	if !isAlive {
+		s.logger.Error().
 			Dur("time_since_last_check", timeSinceLastCheck).
 			Dur("timeout", livenessTimeout).
 			Msg("Liveness check failed: server unresponsive")
@@ -85,8 +87,14 @@ func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.health.isReady() {
-		log.Warn().Msg("Readiness check failed: server not ready")
+	isReady := s.health.isReady()
+	isAlive := s.health.timeSinceLastCheck() <= livenessTimeout
+
+	// Update metrics
+	s.metrics.updateHealthMetrics(isReady, isAlive)
+
+	if !isReady {
+		s.logger.Warn().Msg("Readiness check failed: server not ready")
 		http.Error(w, "Server not ready", http.StatusServiceUnavailable)
 		return
 	}

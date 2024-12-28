@@ -12,6 +12,10 @@ spec:
     metadata:
       labels:
         app: pod-label-webhook
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8443"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: webhook
@@ -28,7 +32,8 @@ spec:
             - name: WEBHOOK_KEY_FILE
               value: "/tls/tls.key"
           ports:
-            - containerPort: 8443
+            - name: webhook
+              containerPort: 8443
           livenessProbe:
             httpGet:
               path: /healthz
@@ -69,10 +74,18 @@ kind: Service
 metadata:
   name: pod-label-webhook
   namespace: webhook-test
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8443"
+    prometheus.io/path: "/metrics"
 spec:
   type: ClusterIP
   ports:
     - port: 443
       targetPort: 8443
+      name: webhook
+    - port: 8443
+      targetPort: 8443
+      name: metrics
   selector:
     app: pod-label-webhook

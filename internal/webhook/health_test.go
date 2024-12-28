@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jjshanks/pod-label-webhook/internal/config"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -66,7 +67,8 @@ func setupTestServer(t *testing.T, clock Clock) *Server {
 		LogLevel: "debug",
 	}
 
-	srv, err := NewServer(cfg)
+	reg := prometheus.NewRegistry()
+	srv, err := NewTestServer(cfg, reg)
 	assert.NoError(t, err)
 	assert.NotNil(t, srv)
 
