@@ -16,6 +16,7 @@ import (
 type Server struct {
 	logger zerolog.Logger
 	config *config.Config
+	health *healthState
 }
 
 func NewServer(cfg *config.Config) (*Server, error) {
@@ -43,6 +44,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	return &Server{
 		logger: logger,
 		config: cfg,
+		health: newHealthState(realClock{}),
 	}, nil
 }
 
@@ -59,7 +61,14 @@ func (s *Server) Run() error {
 	}
 
 	mux := http.NewServeMux()
+
+	// Add handlers for webhook and health endpoints
 	mux.HandleFunc("/mutate", s.handleMutate)
+	mux.HandleFunc("/healthz", s.handleLiveness)
+	mux.HandleFunc("/readyz", s.handleReadiness)
+
+	// Mark the server as ready after all handlers are set up
+	s.health.markReady()
 
 	server := &http.Server{
 		Addr:              s.config.Address,
