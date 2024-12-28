@@ -1,10 +1,14 @@
 package webhook
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/jjshanks/pod-label-webhook/internal/config"
@@ -13,10 +17,13 @@ import (
 )
 
 type Server struct {
-	logger  zerolog.Logger
-	config  *config.Config
-	health  *healthState
-	metrics *metrics
+	logger          zerolog.Logger
+	config          *config.Config
+	health          *healthState
+	metrics         *metrics
+	server          *http.Server
+	gracefulTimeout time.Duration
+	serverMu        sync.RWMutex // Protects server field
 }
 
 func NewServer(cfg *config.Config) (*Server, error) {
@@ -41,45 +48,20 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		})
 	}
 
-	// Initialize metrics with default registry
-	m, err := initMetrics(nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize metrics: %w", err)
-	}
-
-	return &Server{
-		logger:  logger,
-		config:  cfg,
-		health:  newHealthState(realClock{}),
-		metrics: m,
-	}, nil
-}
-
-func NewTestServer(cfg *config.Config, reg prometheus.Registerer) (*Server, error) {
-	// Create base logger with common fields
-	logger := zerolog.New(os.Stdout).With().
-		Timestamp().
-		Str("service", "pod-label-webhook").
-		Logger()
-
-	// Configure log level
-	level, err := zerolog.ParseLevel(cfg.LogLevel)
-	if err != nil {
-		return nil, fmt.Errorf("invalid log level: %w", err)
-	}
-	logger = logger.Level(level)
-
-	// Initialize metrics with provided registry
+	// Initialize metrics with new registry if none provided
+	reg := prometheus.NewRegistry()
 	m, err := initMetrics(reg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize metrics: %w", err)
 	}
 
 	return &Server{
-		logger:  logger,
-		config:  cfg,
-		health:  newHealthState(realClock{}),
-		metrics: m,
+		logger:          logger,
+		config:          cfg,
+		health:          newHealthState(realClock{}),
+		metrics:         m,
+		gracefulTimeout: 30 * time.Second,
+		serverMu:        sync.RWMutex{},
 	}, nil
 }
 
@@ -105,17 +87,11 @@ func (s *Server) Run() error {
 	// Add metrics endpoint
 	mux.Handle("/metrics", s.metrics.handler())
 
-	// Mark the server as ready after all handlers are set up
-	s.health.markReady()
-	s.metrics.updateHealthMetrics(true, true)
-
-	server := &http.Server{
-		Addr:              s.config.Address,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		IdleTimeout:       120 * time.Second,
+	// Initialize HTTP server with secure defaults
+	s.serverMu.Lock()
+	s.server = &http.Server{
+		Addr:    s.config.Address,
+		Handler: mux,
 		TLSConfig: &tls.Config{
 			MinVersion: tls.VersionTLS13,
 			CipherSuites: []uint16{
@@ -132,7 +108,73 @@ func (s *Server) Run() error {
 			InsecureSkipVerify:     false,
 			ClientAuth:             tls.VerifyClientCertIfGiven,
 		},
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
+	s.serverMu.Unlock()
 
-	return server.ListenAndServeTLS(s.config.CertFile, s.config.KeyFile)
+	s.health.markReady()
+	s.metrics.updateHealthMetrics(true, true)
+
+	// Create error channel for server errors
+	serverError := make(chan error, 1)
+
+	// Start server in a goroutine
+	go func() {
+		if err := s.server.ListenAndServeTLS(s.config.CertFile, s.config.KeyFile); err != http.ErrServerClosed {
+			serverError <- err
+		}
+	}()
+
+	// Set up signal handling
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	// Wait for shutdown signal or server error
+	select {
+	case err := <-serverError:
+		return fmt.Errorf("server error: %v", err)
+	case sig := <-stop:
+		s.logger.Info().
+			Str("signal", sig.String()).
+			Msg("Received shutdown signal")
+		return s.shutdown()
+	}
+}
+
+// GetAddr returns the server's current address in a thread-safe way
+func (s *Server) GetAddr() string {
+	s.serverMu.RLock()
+	defer s.serverMu.RUnlock()
+	if s.server == nil {
+		return s.config.Address
+	}
+	return s.server.Addr
+}
+
+func (s *Server) shutdown() error {
+	// Mark server as not ready
+	s.health.ready.Store(false)
+	s.metrics.updateHealthMetrics(false, true)
+
+	s.logger.Info().
+		Dur("timeout", s.gracefulTimeout).
+		Msg("Shutting down server")
+
+	// Create shutdown context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), s.gracefulTimeout)
+	defer cancel()
+
+	// Shutdown server gracefully
+	s.serverMu.RLock()
+	if err := s.server.Shutdown(ctx); err != nil {
+		s.serverMu.RUnlock()
+		return fmt.Errorf("error during server shutdown: %v", err)
+	}
+	s.serverMu.RUnlock()
+
+	s.logger.Info().Msg("Server shutdown completed")
+	return nil
 }
