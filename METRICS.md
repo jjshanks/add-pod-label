@@ -33,6 +33,10 @@ The pod-label-webhook exposes Prometheus metrics on the `/metrics` endpoint. Thi
 - **Histogram**: Measures the distribution of values (e.g., request durations)
 - **Gauge**: Single numerical value that can go up and down
 
+## Histogram Buckets
+
+The webhook uses custom histogram buckets optimized for typical webhook latencies (5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s). For more information on tuning histogram buckets, see the [Prometheus histogram documentation](https://prometheus.io/docs/practices/histograms/).
+
 ## Scraping Configuration
 
 The metrics endpoint is configured to work with standard Prometheus scraping. The service is annotated with:
@@ -45,9 +49,35 @@ metadata:
     prometheus.io/path: "/metrics"
 ```
 
-## Prometheus Service Monitor
+## TLS Configuration
 
-If you're using the Prometheus Operator, you can use this ServiceMonitor configuration:
+To properly configure TLS for metrics scraping:
+
+1. Create a certificate for metrics scraping:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: webhook-metrics-cert
+  namespace: webhook-test
+spec:
+  secretName: webhook-metrics-cert
+  duration: 8760h # 1 year
+  renewBefore: 720h # 30 days
+  subject:
+    organizations:
+      - webhook-system
+  commonName: pod-label-webhook-metrics
+  dnsNames:
+    - pod-label-webhook.webhook-test.svc
+    - pod-label-webhook.webhook-test.svc.cluster.local
+  issuerRef:
+    name: webhook-selfsigned-issuer
+    kind: Issuer
+```
+
+2. Configure the ServiceMonitor to use the certificate:
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -55,8 +85,6 @@ kind: ServiceMonitor
 metadata:
   name: pod-label-webhook
   namespace: webhook-test
-  labels:
-    release: prometheus
 spec:
   selector:
     matchLabels:
@@ -68,7 +96,17 @@ spec:
     - port: metrics
       scheme: https
       tlsConfig:
-        insecureSkipVerify: true
+        ca:
+          secret:
+            name: webhook-metrics-cert
+            key: ca.crt
+        cert:
+          secret:
+            name: webhook-metrics-cert
+            key: tls.crt
+        keySecret:
+          name: webhook-metrics-cert
+          key: tls.key
       interval: 30s
       scrapeTimeout: 10s
       path: /metrics
@@ -149,19 +187,18 @@ groups:
 
 ## Example Grafana Dashboard
 
-A Grafana dashboard JSON model is available in the `dashboards` directory that includes:
+The Grafana dashboard JSON can be found in [dashboards/pod-label-webhook.json](dashboards/pod-label-webhook.json).
 
-- Request rate and error rate panels
-- Latency distribution graphs
-- Health status indicators
-- Top endpoints by request volume
-- Error rate breakdown by status code
+1. Request Rate gauge
+2. Request Duration (P95) time series
+3. Readiness Status indicator
+4. Error Rate by Path time series
 
 ## Metric Retention and Storage
 
 Consider the following when planning metric retention:
 
-1. The `request_duration_seconds` histogram has default buckets which may need tuning based on your latency profile
+1. The `request_duration_seconds` histogram has custom buckets optimized for webhook latencies
 2. Counter metrics are relatively low cardinality and safe for long-term storage
 3. Health metrics are point-in-time and can be downsampled aggressively
 

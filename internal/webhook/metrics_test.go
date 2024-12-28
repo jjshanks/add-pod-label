@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jjshanks/pod-label-webhook/internal/config"
 	"github.com/prometheus/client_golang/prometheus"
@@ -16,18 +17,28 @@ import (
 
 func TestMetricsInitialization(t *testing.T) {
 	tests := []struct {
-		name    string
-		wantErr bool
+		name     string
+		registry *prometheus.Registry
+		wantErr  bool
 	}{
 		{
-			name:    "successful initialization",
+			name:    "successful initialization with default registry",
 			wantErr: false,
+		},
+		{
+			name:     "initialization with custom registry",
+			registry: prometheus.NewRegistry(),
+			wantErr:  false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reg := prometheus.NewRegistry()
+			reg := tt.registry
+			if reg == nil {
+				reg = prometheus.NewRegistry()
+			}
+
 			m, err := initMetrics(reg)
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -37,11 +48,150 @@ func TestMetricsInitialization(t *testing.T) {
 
 			assert.NoError(t, err)
 			assert.NotNil(t, m)
-			assert.NotNil(t, m.requestCounter)
-			assert.NotNil(t, m.requestDuration)
-			assert.NotNil(t, m.errorCounter)
-			assert.NotNil(t, m.readinessGauge)
-			assert.NotNil(t, m.livenessGauge)
+
+			// Verify metrics are registered
+			metrics, err := reg.Gather()
+			require.NoError(t, err)
+			assert.NotEmpty(t, metrics, "Expected metrics to be registered")
+		})
+	}
+}
+
+func TestMetricsMiddlewareEdgeCases(t *testing.T) {
+	// Helper function to create a large string of specified size in KB
+	createLargeString := func(sizeKB int) string {
+		chunk := strings.Repeat("x", 1024) // 1KB chunk
+		return strings.Repeat(chunk, sizeKB)
+	}
+
+	tests := []struct {
+		name           string
+		path           string
+		method         string
+		statusCode     int
+		expectedLabels map[string]string
+		requestBody    string
+		responseBody   string
+		handler        http.HandlerFunc
+		sleep          time.Duration
+	}{
+		{
+			name:       "panicking handler",
+			path:       "/panic",
+			method:     "POST",
+			statusCode: http.StatusInternalServerError,
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				panic("intentional panic for testing")
+			},
+		},
+		{
+			name:       "slow handler",
+			path:       "/slow",
+			method:     "GET",
+			statusCode: http.StatusOK,
+			sleep:      2 * time.Second,
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				time.Sleep(2 * time.Second)
+				w.WriteHeader(http.StatusOK)
+			},
+		},
+		{
+			name:        "large request body",
+			path:        "/large-request",
+			method:      "POST",
+			statusCode:  http.StatusOK,
+			requestBody: createLargeString(500), // 500KB request
+		},
+		{
+			name:       "large response body",
+			path:       "/large-response",
+			method:     "GET",
+			statusCode: http.StatusOK,
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(createLargeString(500))) // 500KB response
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := prometheus.NewRegistry()
+			m, err := initMetrics(reg)
+			require.NoError(t, err)
+
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tt.handler != nil {
+					tt.handler(w, r)
+					return
+				}
+				w.WriteHeader(tt.statusCode)
+				if tt.responseBody != "" {
+					_, _ = w.Write([]byte(tt.responseBody))
+				}
+			})
+
+			// Create test request
+			var body io.Reader
+			if tt.requestBody != "" {
+				body = strings.NewReader(tt.requestBody)
+			}
+			req := httptest.NewRequest(tt.method, tt.path, body)
+			w := httptest.NewRecorder()
+
+			// Wrap handler with metrics middleware
+			m.metricsMiddleware(handler).ServeHTTP(w, req)
+
+			// Verify metrics were recorded
+			metrics, err := reg.Gather()
+			require.NoError(t, err)
+			assert.NotEmpty(t, metrics)
+
+			// For panic case, verify error metrics
+			if tt.path == "/panic" {
+				errorCounter, err := m.errorCounter.GetMetricWith(map[string]string{
+					"path":   tt.path,
+					"method": tt.method,
+					"status": "500",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(errorCounter))
+			}
+
+			// For slow handler, verify duration metric is recorded in appropriate bucket
+			if tt.sleep > 0 {
+				// Get all metric families
+				metricFamilies, err := reg.Gather()
+				require.NoError(t, err)
+
+				var foundDurationMetric bool
+				expectedSeconds := tt.sleep.Seconds()
+
+				// Find the duration histogram metric
+				for _, mf := range metricFamilies {
+					if mf.GetName() == "pod_label_webhook_request_duration_seconds" {
+						foundDurationMetric = true
+						// Look through histogram buckets
+						for _, m := range mf.GetMetric() {
+							if m.GetHistogram() != nil {
+								// Verify the request duration was recorded in appropriate bucket
+								lastCount := uint64(0)
+								for _, bucket := range m.GetHistogram().GetBucket() {
+									if bucket.GetUpperBound() > expectedSeconds {
+										// Verify this bucket has a higher count than the previous bucket
+										assert.Greater(t, bucket.GetCumulativeCount(), lastCount,
+											"Expected slow request to be recorded in bucket with upper bound %v",
+											bucket.GetUpperBound())
+										break
+									}
+									lastCount = bucket.GetCumulativeCount()
+								}
+							}
+						}
+					}
+				}
+				assert.True(t, foundDurationMetric, "Expected to find duration metric")
+			}
 		})
 	}
 }

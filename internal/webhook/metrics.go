@@ -3,14 +3,21 @@ package webhook
 import (
 	"fmt"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/rs/zerolog/log"
 )
 
 const (
 	metricsNamespace = "pod_label_webhook"
+)
+
+var (
+	// Buckets optimized for webhook latencies: 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s
+	webhookDurationBuckets = []float64{0.005, 0.010, 0.025, 0.050, 0.100, 0.250, 0.500, 1.000, 2.500, 5.000}
 )
 
 // metrics holds our Prometheus metrics
@@ -50,7 +57,7 @@ func initMetrics(reg prometheus.Registerer) (*metrics, error) {
 			Namespace: metricsNamespace,
 			Name:      "request_duration_seconds",
 			Help:      "Request duration in seconds",
-			Buckets:   prometheus.DefBuckets,
+			Buckets:   webhookDurationBuckets,
 		},
 		[]string{"path", "method"},
 	)
@@ -106,12 +113,29 @@ func initMetrics(reg prometheus.Registerer) (*metrics, error) {
 func (m *metrics) metricsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-
-		// Wrap ResponseWriter to capture status code
 		wrapped := newStatusRecorder(w)
+
+		defer func() {
+			if err := recover(); err != nil {
+				// Log the panic
+				log.Error().
+					Interface("panic", err).
+					Str("stack", string(debug.Stack())).
+					Msg("Handler panic recovered")
+
+				// Set 500 status
+				wrapped.WriteHeader(http.StatusInternalServerError)
+
+				// Record error metrics
+				m.requestCounter.WithLabelValues(r.URL.Path, r.Method, "500").Inc()
+				m.errorCounter.WithLabelValues(r.URL.Path, r.Method, "500").Inc()
+				m.requestDuration.WithLabelValues(r.URL.Path, r.Method).Observe(time.Since(start).Seconds())
+			}
+		}()
+
 		next.ServeHTTP(wrapped, r)
 
-		// Record metrics
+		// Record metrics after successful handling
 		m.requestCounter.WithLabelValues(r.URL.Path, r.Method, fmt.Sprintf("%d", wrapped.status)).Inc()
 		m.requestDuration.WithLabelValues(r.URL.Path, r.Method).Observe(time.Since(start).Seconds())
 
