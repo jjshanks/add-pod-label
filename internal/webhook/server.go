@@ -173,11 +173,11 @@ func (s *Server) shutdown() error {
 }
 
 // GetAddr returns the server's current address in a thread-safe way
-func (s *Server) GetAddr() string {
+func (s *Server) GetAddr() (string, error) {
 	s.serverMu.RLock()
 	defer s.serverMu.RUnlock()
 	if s.server == nil {
-		return s.config.Address
+		return "", fmt.Errorf("server is not initialized")
 	}
-	return s.server.Addr
+	return s.server.Addr, nil
 }

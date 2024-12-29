@@ -339,19 +339,53 @@ func TestServerShutdown(t *testing.T) {
 
 // TestGetAddr tests the GetAddr method
 func TestGetAddr(t *testing.T) {
-	srv, cleanup := setupTest(t)
-	defer cleanup()
+	tests := []struct {
+		name    string
+		setup   func() *Server
+		wantErr bool
+	}{
+		{
+			name: "server not initialized",
+			setup: func() *Server {
+				return &Server{
+					logger:   zerolog.New(io.Discard),
+					config:   &config.Config{},
+					health:   newHealthState(realClock{}),
+					serverMu: sync.RWMutex{},
+				}
+			},
+			wantErr: true,
+		},
+		{
+			name: "server initialized",
+			setup: func() *Server {
+				srv, cleanup := setupTest(t)
+				t.Cleanup(cleanup)
+				return srv
+			},
+			wantErr: false,
+		},
+	}
 
-	// Check that GetAddr returns a valid address
-	addr := srv.GetAddr()
-	assert.NotEmpty(t, addr)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := tt.setup()
 
-	// The address should either be the default or a randomly assigned port
-	assert.True(t,
-		strings.HasPrefix(addr, "localhost:") ||
-			strings.HasPrefix(addr, "0.0.0.0:"),
-		"Unexpected address format",
-	)
+			addr, err := srv.GetAddr()
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Empty(t, addr)
+			} else {
+				assert.NoError(t, err)
+				assert.NotEmpty(t, addr)
+				assert.True(t,
+					strings.HasPrefix(addr, "localhost:") ||
+						strings.HasPrefix(addr, "0.0.0.0:"),
+					"Unexpected address format",
+				)
+			}
+		})
+	}
 }
 
 func TestServerShutdownSignals(t *testing.T) {
@@ -393,21 +427,36 @@ func TestServerShutdownSignals(t *testing.T) {
 				Timeout: 5 * time.Second,
 			}
 
+			var addr string
 			var resp *http.Response
 			var err error
 			for i := 0; i < 10; i++ {
-				resp, err = client.Get(fmt.Sprintf("https://%s/healthz", srv.GetAddr()))
-				if err == nil {
+				addr, err = srv.GetAddr()
+				if err != nil {
+					t.Logf("Failed to get server address on attempt %d: %v", i+1, err)
+					time.Sleep(200 * time.Millisecond)
+					continue
+				}
+
+				resp, err = client.Get(fmt.Sprintf("https://%s/healthz", addr))
+				if err != nil {
+					t.Logf("Health check attempt %d failed: %v", i+1, err)
+					time.Sleep(200 * time.Millisecond)
+					continue
+				}
+
+				defer resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
 					break
 				}
-				t.Logf("Health check attempt %d failed: %v", i+1, err)
+
+				t.Logf("Health check returned status %d on attempt %d", resp.StatusCode, i+1)
 				time.Sleep(200 * time.Millisecond)
 			}
-			require.NoError(t, err)
+			require.NoError(t, err, "Failed to get successful health check response")
 			require.Equal(t, http.StatusOK, resp.StatusCode)
-			resp.Body.Close()
 
-			t.Logf("Server successfully started and verified at %s", srv.GetAddr())
+			t.Logf("Server successfully started and verified at %s", addr)
 
 			// Send shutdown signal
 			t.Logf("Sending %s signal...", tc.name)
@@ -430,7 +479,7 @@ func TestServerShutdownSignals(t *testing.T) {
 
 			// Verify server is no longer accepting connections
 			t.Log("Verifying server is no longer accepting connections...")
-			_, err = client.Get(fmt.Sprintf("https://%s/healthz", srv.GetAddr()))
+			_, err = client.Get(fmt.Sprintf("https://%s/healthz", addr))
 			assert.Error(t, err)
 
 			wg.Wait()
@@ -444,7 +493,6 @@ func waitForServer(t *testing.T, srv *Server) string {
 	ready := make(chan string)
 	timeout := time.After(10 * time.Second)
 
-	// Check server status in a goroutine
 	go func() {
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
@@ -452,8 +500,8 @@ func waitForServer(t *testing.T, srv *Server) string {
 		for {
 			select {
 			case <-ticker.C:
-				addr := srv.GetAddr()
-				if addr != "" && addr != "localhost:0" && srv.health.isReady() {
+				addr, err := srv.GetAddr()
+				if err == nil && addr != "" && addr != "localhost:0" && srv.health.isReady() {
 					ready <- addr
 					return
 				}
@@ -463,14 +511,14 @@ func waitForServer(t *testing.T, srv *Server) string {
 		}
 	}()
 
-	// Wait for either ready signal or timeout
 	select {
 	case addr := <-ready:
 		t.Logf("Server ready at address: %s", addr)
 		return addr
 	case <-timeout:
-		t.Fatalf("Timeout waiting for server to be ready. Address: %s, Ready state: %v",
-			srv.GetAddr(), srv.health.isReady())
+		addr, err := srv.GetAddr()
+		t.Fatalf("Timeout waiting for server to be ready. Address: %v (err: %v), Ready state: %v",
+			addr, err, srv.health.isReady())
 		return ""
 	}
 }
