@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -15,9 +16,10 @@ import (
 
 type Config struct {
 	// Server configuration
-	Address  string
-	CertFile string
-	KeyFile  string
+	Address         string
+	CertFile        string
+	KeyFile         string
+	GracefulTimeout time.Duration
 
 	// Logging configuration
 	LogLevel string
@@ -27,11 +29,12 @@ type Config struct {
 // New creates a new Config with default values
 func New() *Config {
 	return &Config{
-		Address:  "0.0.0.0:8443",
-		CertFile: "/etc/webhook/certs/tls.crt",
-		KeyFile:  "/etc/webhook/certs/tls.key",
-		LogLevel: "info",
-		Console:  false,
+		Address:         "0.0.0.0:8443",
+		CertFile:        "/etc/webhook/certs/tls.crt",
+		KeyFile:         "/etc/webhook/certs/tls.key",
+		GracefulTimeout: 30 * time.Second,
+		LogLevel:        "info",
+		Console:         false,
 	}
 }
 
@@ -58,6 +61,11 @@ func (c *Config) Validate() error {
 		if ip := net.ParseIP(host); ip == nil {
 			return fmt.Errorf("invalid IP address: %q", host)
 		}
+	}
+
+	// Validate graceful timeout
+	if c.GracefulTimeout <= 0 {
+		return fmt.Errorf("graceful timeout must be positive, got %v", c.GracefulTimeout)
 	}
 
 	return nil
@@ -113,7 +121,15 @@ func LoadConfig(cfgFile string) (*Config, error) {
 	viper.AutomaticEnv()
 
 	// Bind all config keys at once
-	configKeys := []string{"address", "cert-file", "key-file", "log-level", "console"}
+	configKeys := []string{
+		"address",
+		"cert-file",
+		"key-file",
+		"graceful-timeout",
+		"log-level",
+		"console",
+	}
+
 	for _, key := range configKeys {
 		if err := viper.BindEnv(key); err != nil {
 			log.Error().Err(err).Msgf("Failed to bind environment variable for key: %s", key)
@@ -165,40 +181,46 @@ func LoadConfig(cfgFile string) (*Config, error) {
 				return nil, fmt.Errorf("error unmarshaling config: console must be a boolean")
 			}
 		}
+		if viper.IsSet("graceful-timeout") {
+			rawValue := viper.Get("graceful-timeout")
+			switch v := rawValue.(type) {
+			case int, int32, int64:
+				// Will be handled in the update section
+			case string:
+				if _, err := time.ParseDuration(v); err != nil {
+					return nil, fmt.Errorf("invalid graceful timeout duration: %v", err)
+				}
+			default:
+				return nil, fmt.Errorf("graceful timeout must be a duration string or integer seconds")
+			}
+		}
 	}
 
 	// Update config from viper (will get either environment variables or config file values)
 	if viper.IsSet("address") {
-		address := viper.GetString("address")
-		if address != "" {
-			config.Address = address
-		}
+		config.Address = viper.GetString("address")
 	}
 	if viper.IsSet("cert-file") {
-		certFile := viper.GetString("cert-file")
-		if certFile != "" {
-			config.CertFile = certFile
-		}
+		config.CertFile = viper.GetString("cert-file")
 	}
 	if viper.IsSet("key-file") {
-		keyFile := viper.GetString("key-file")
-		if keyFile != "" {
-			config.KeyFile = keyFile
-		}
+		config.KeyFile = viper.GetString("key-file")
 	}
 	if viper.IsSet("log-level") {
-		logLevel := viper.GetString("log-level")
-		if logLevel != "" {
-			config.LogLevel = logLevel
-		}
+		config.LogLevel = viper.GetString("log-level")
 	}
 	if viper.IsSet("console") {
 		config.Console = viper.GetBool("console")
 	}
-
-	// Validate configuration values after loading
-	if config.Address == "" || config.CertFile == "" || config.KeyFile == "" || config.LogLevel == "" {
-		return nil, fmt.Errorf("error unmarshaling config: missing required fields")
+	if viper.IsSet("graceful-timeout") {
+		rawValue := viper.GetString("graceful-timeout")
+		if duration, err := time.ParseDuration(rawValue); err == nil {
+			config.GracefulTimeout = duration
+		} else if seconds, err := strconv.ParseInt(rawValue, 10, 64); err == nil && seconds > 0 {
+			config.GracefulTimeout = time.Duration(seconds) * time.Second
+		} else {
+			return nil, fmt.Errorf("invalid graceful timeout value: %s (must be duration string or positive integer)", rawValue)
+		}
 	}
 
 	return config, nil
