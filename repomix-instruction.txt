@@ -1,6 +1,6 @@
 Project Goals
 -------
-- Be an example of a complete and well rounded go project
+- Be an example of a complete and well-rounded go project
 
 Coding Guidelines:
 --------
