@@ -522,3 +522,85 @@ func waitForServer(t *testing.T, srv *Server) string {
 		return ""
 	}
 }
+
+func TestServerShutdownTimeout(t *testing.T) {
+	// Create a temporary directory for test certificates
+	tempDir, err := os.MkdirTemp("", "webhook-timeout-test-")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create test certificate files
+	certFile := filepath.Join(tempDir, "tls.crt")
+	keyFile := filepath.Join(tempDir, "tls.key")
+
+	// Generate self-signed certificate
+	err = generateSelfSignedCert(certFile, keyFile)
+	require.NoError(t, err)
+
+	// Create a server configuration with temp certificate paths
+	cfg := &config.Config{
+		Address:  "localhost:0", // Use port 0 to let the OS assign a free port
+		CertFile: certFile,
+		KeyFile:  keyFile,
+		LogLevel: "debug",
+		Console:  true,
+	}
+
+	// Create a new Prometheus registry for this test
+	reg := prometheus.NewRegistry()
+
+	// Create server instance
+	srv, err := NewTestServer(cfg, reg)
+	require.NoError(t, err)
+
+	// Reduce the graceful timeout to test short timeout scenario
+	srv.gracefulTimeout = 10 * time.Millisecond
+
+	// Channels for synchronization
+	serverStarted := make(chan struct{})
+	serverStopped := make(chan error, 1)
+
+	// Start server listener in a goroutine
+	go func() {
+		close(serverStarted)
+		err := srv.server.ListenAndServeTLS(srv.config.CertFile, srv.config.KeyFile)
+		if err != nil && err != http.ErrServerClosed {
+			serverStopped <- err
+		}
+		close(serverStopped)
+	}()
+
+	// Wait for server to start
+	<-serverStarted
+	time.Sleep(50 * time.Millisecond)
+
+	// Create context with very short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+
+	// Measure shutdown time
+	startShutdown := time.Now()
+	err = srv.server.Shutdown(ctx)
+	shutdownDuration := time.Since(startShutdown)
+
+	// Check shutdown results
+	if err != nil && err != context.DeadlineExceeded {
+		t.Errorf("Unexpected shutdown error: %v", err)
+	}
+
+	t.Logf("Shutdown completed in %v", shutdownDuration)
+
+	// Verify server is no longer ready
+	assert.False(t, srv.health.isReady())
+
+	// Wait for server to stop or timeout
+	select {
+	case srvErr := <-serverStopped:
+		// We expect either nil or ErrServerClosed
+		if srvErr != nil && srvErr != http.ErrServerClosed {
+			t.Errorf("Unexpected server error: %v", srvErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Server did not shut down in time")
+	}
+}
