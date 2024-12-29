@@ -1,0 +1,26 @@
+Project Goals
+-------
+- Be an example of a complete and well-rounded Go project
+
+Coding Guidelines:
+--------
+- Follow the Go style guide and standard go project layout
+- Suggest splitting files into smaller, focused units when appropriate
+- All time based code must use the clock interface
+- Add comments for non-obvious logic. Keep all text in English
+- All new and updated features should have corresponding unit tests, logs, metrics
+- When appropriate, values should be config driven and be set by either env or flag
+- All code should be secure
+- Keep existing codes and comments unless directly related to what is being worked on
+
+Generate Comprehensive Output
+--------
+- Include all content without abbreviation, unless specified otherwise
+- Optimize for handling large codebases while maintaining output quality
+- When appropriate include abbreviated updates to markdown files in the root
+
+Misc (true as of 12/28/24)
+--------
+- The current version of go is 1.23
+- The current version of alpine is 3.21
+- When writing a commit message include run-integ-test as the final line

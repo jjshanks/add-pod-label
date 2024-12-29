@@ -52,14 +52,26 @@ func (s *Server) recordAnnotationMetrics(pod *corev1.Pod) {
 	}
 }
 
+// shouldAddLabel determines whether a label should be added to a pod
+// based on its annotations. The default behavior is to add the label.
+//
+// Rules:
+// - If no annotation is present, return true (add label)
+// - If annotation is "true", return true (add label)
+// - If annotation is "false", return false (skip label)
+// - If annotation has an invalid value, log a warning and default to true
 func (s *Server) shouldAddLabel(pod *corev1.Pod) bool {
+	// Retrieve the annotation value
 	val, ok := pod.Annotations[annotationKey]
 	if !ok {
+		// No annotation present, default to adding label
 		return true
 	}
 
+	// Attempt to parse the annotation value as a boolean
 	parsed, err := strconv.ParseBool(val)
 	if err != nil {
+		// Invalid annotation value: log warning and default to true
 		s.logger.Warn().
 			Str("value", val).
 			Str("pod", pod.Name).
@@ -90,7 +102,18 @@ func (s *Server) createLabelsMap(pod *corev1.Pod) (map[string]string, error) {
 	return labels, nil
 }
 
+// createPatch generates a JSON patch for modifying pod labels
+//
+// This method handles several scenarios:
+// 1. Pods without any existing labels
+// 2. Pods with existing labels
+// 3. Pods with annotation to disable labeling
+//
+// Returns:
+// - A JSON patch that can add or replace labels
+// - An error if validation fails (e.g., nil pod, invalid label key)
 func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
+	// Validate input pod
 	if pod == nil {
 		return nil, &WebhookError{
 			Op:  "validate",
@@ -98,15 +121,17 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 		}
 	}
 
+	// Log detailed information about the pod for debugging and audit purposes
 	s.logger.Debug().
 		Str("pod", pod.Name).
 		Str("namespace", pod.Namespace).
-		Bool("has_labels", pod.Labels != nil).
+		Bool("has_existing_labels", pod.Labels != nil).
 		Bool("has_hello_annotation", pod.Annotations != nil && pod.Annotations[annotationKey] != "").
-		Msg("Creating patch")
+		Msg("Preparing to create label patch")
 
 	s.recordAnnotationMetrics(pod)
 
+	// Check if labels should be added based on annotation
 	if !s.shouldAddLabel(pod) {
 		s.logger.Debug().
 			Str("pod", pod.Name).
@@ -120,14 +145,17 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 		return nil, err
 	}
 
+	// Prepare patch operations based on whether labels exist
 	var patch []patchOperation
 	if pod.Labels == nil {
+		// If no labels exist, add a new labels map
 		patch = []patchOperation{{
 			Op:    "add",
 			Path:  "/metadata/labels",
 			Value: labels,
 		}}
 	} else {
+		// If labels exist, replace the entire labels map
 		patch = []patchOperation{{
 			Op:    "replace",
 			Path:  "/metadata/labels",
@@ -135,6 +163,7 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 		}}
 	}
 
+	// Marshal patch with error handling
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
 		s.metrics.recordLabelOperation(labelOperationError, pod.Namespace)
@@ -153,19 +182,29 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 	return patchBytes, nil
 }
 
+// handleMutate is the HTTP handler for the mutating webhook
+//
+// This method:
+// 1. Validates the incoming request
+// 2. Extracts the pod from the admission review
+// 3. Generates a patch to modify pod labels
+// 4. Sends an admission review response
+//
+// Handles various error scenarios and provides detailed logging
 func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
-	// Get request ID for error context
+	// Generate a unique request ID for tracing
 	reqID := r.Header.Get("X-Request-ID")
 	if reqID == "" {
 		reqID = uuid.New().String()
 	}
 
+	// Create a context-aware logger with request details
 	logger := s.logger.With().
 		Str("request_id", reqID).
 		Str("handler", "mutate").
 		Logger()
 
-	// Read request body with error context
+	// Read the entire request body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		err = fmt.Errorf("failed to read request body: %w", err)
@@ -174,7 +213,7 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate content type with specific error
+	// Validate content type
 	if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
 		err := fmt.Errorf("invalid Content-Type %q, expected 'application/json'", contentType)
 		logger.Error().Err(err).Str("content_type", contentType).Msg("Invalid content type")
@@ -182,7 +221,7 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode admission review with structured error
+	// Decode the admission review
 	admissionReview := &admissionv1.AdmissionReview{}
 	if _, _, err := deserializer.Decode(body, nil, admissionReview); err != nil {
 		err = newDecodeError(err, "admission review")
@@ -191,6 +230,7 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate admission review request
 	request := admissionReview.Request
 	if request == nil {
 		err := &WebhookError{
@@ -205,7 +245,7 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 	// Add request UID to logger context
 	logger = logger.With().Str("uid", string(request.UID)).Logger()
 
-	// Unmarshal pod with context
+	// Unmarshal the pod from the request
 	pod := &corev1.Pod{}
 	if err := json.Unmarshal(request.Object.Raw, pod); err != nil {
 		err = newDecodeError(err, fmt.Sprintf("pod/%s", pod.Name))
@@ -214,7 +254,7 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create patch with error wrapping
+	// Create label patch
 	patchBytes, err := s.createPatch(pod)
 	if err != nil {
 		err = newPatchError(err, fmt.Sprintf("pod/%s", pod.Name))
@@ -223,7 +263,7 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build and send response with error handling
+	// Prepare admission review response
 	patchType := admissionv1.PatchTypeJSONPatch
 	response := &admissionv1.AdmissionReview{
 		TypeMeta: metav1.TypeMeta{
@@ -238,6 +278,7 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	// Marshal response
 	respBytes, err := json.Marshal(response)
 	if err != nil {
 		err = fmt.Errorf("failed to marshal response: %w", err)
@@ -246,6 +287,7 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Write response
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write(respBytes); err != nil {
 		logger.Error().Err(err).Msg("Failed to write response")
