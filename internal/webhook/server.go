@@ -144,16 +144,6 @@ func (s *Server) Run() error {
 	}
 }
 
-// GetAddr returns the server's current address in a thread-safe way
-func (s *Server) GetAddr() string {
-	s.serverMu.RLock()
-	defer s.serverMu.RUnlock()
-	if s.server == nil {
-		return s.config.Address
-	}
-	return s.server.Addr
-}
-
 func (s *Server) shutdown() error {
 	// Mark server as not ready
 	s.health.ready.Store(false)
@@ -168,13 +158,26 @@ func (s *Server) shutdown() error {
 	defer cancel()
 
 	// Shutdown server gracefully
+	// Get server reference under lock
 	s.serverMu.RLock()
-	if err := s.server.Shutdown(ctx); err != nil {
-		s.serverMu.RUnlock()
+	server := s.server
+	s.serverMu.RUnlock()
+
+	// Shutdown server gracefully
+	if err := server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("error during server shutdown: %v", err)
 	}
-	s.serverMu.RUnlock()
 
 	s.logger.Info().Msg("Server shutdown completed")
 	return nil
+}
+
+// GetAddr returns the server's current address in a thread-safe way
+func (s *Server) GetAddr() string {
+	s.serverMu.RLock()
+	defer s.serverMu.RUnlock()
+	if s.server == nil {
+		return s.config.Address
+	}
+	return s.server.Addr
 }

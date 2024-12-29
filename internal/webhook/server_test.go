@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -351,4 +352,125 @@ func TestGetAddr(t *testing.T) {
 			strings.HasPrefix(addr, "0.0.0.0:"),
 		"Unexpected address format",
 	)
+}
+
+func TestServerShutdownSignals(t *testing.T) {
+	testCases := []struct {
+		name   string
+		signal os.Signal
+	}{
+		{"SIGTERM", syscall.SIGTERM},
+		{"SIGINT", syscall.SIGINT},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := setupTestServer(t, nil) // Pass nil for clock since this test doesn't need time control
+			defer srv.cleanup()
+
+			// Start server
+			errCh := make(chan error, 1)
+			var wg sync.WaitGroup
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+				t.Log("Starting server...")
+				errCh <- srv.Run()
+			}()
+
+			// Give the server a moment to start
+			time.Sleep(250 * time.Millisecond)
+
+			// Test health endpoint with retries
+			t.Log("Testing health endpoint...")
+			client := &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						InsecureSkipVerify: true,
+					},
+				},
+				Timeout: 5 * time.Second,
+			}
+
+			var resp *http.Response
+			var err error
+			for i := 0; i < 10; i++ {
+				resp, err = client.Get(fmt.Sprintf("https://%s/healthz", srv.GetAddr()))
+				if err == nil {
+					break
+				}
+				t.Logf("Health check attempt %d failed: %v", i+1, err)
+				time.Sleep(200 * time.Millisecond)
+			}
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			resp.Body.Close()
+
+			t.Logf("Server successfully started and verified at %s", srv.GetAddr())
+
+			// Send shutdown signal
+			t.Logf("Sending %s signal...", tc.name)
+			p, err := os.FindProcess(os.Getpid())
+			require.NoError(t, err)
+			err = p.Signal(tc.signal)
+			require.NoError(t, err)
+
+			// Wait for shutdown
+			select {
+			case shutdownErr := <-errCh:
+				assert.NoError(t, shutdownErr)
+				t.Log("Server shutdown completed")
+			case <-time.After(5 * time.Second):
+				t.Fatal("Server shutdown timed out")
+			}
+
+			// Allow time for server to fully stop
+			time.Sleep(200 * time.Millisecond)
+
+			// Verify server is no longer accepting connections
+			t.Log("Verifying server is no longer accepting connections...")
+			_, err = client.Get(fmt.Sprintf("https://%s/healthz", srv.GetAddr()))
+			assert.Error(t, err)
+
+			wg.Wait()
+		})
+	}
+}
+
+func waitForServer(t *testing.T, srv *Server) string {
+	t.Helper()
+
+	ready := make(chan string)
+	timeout := time.After(10 * time.Second)
+
+	// Check server status in a goroutine
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				addr := srv.GetAddr()
+				if addr != "" && addr != "localhost:0" && srv.health.isReady() {
+					ready <- addr
+					return
+				}
+			case <-timeout:
+				return
+			}
+		}
+	}()
+
+	// Wait for either ready signal or timeout
+	select {
+	case addr := <-ready:
+		t.Logf("Server ready at address: %s", addr)
+		return addr
+	case <-timeout:
+		t.Fatalf("Timeout waiting for server to be ready. Address: %s, Ready state: %v",
+			srv.GetAddr(), srv.health.isReady())
+		return ""
+	}
 }

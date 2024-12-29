@@ -20,7 +20,9 @@ import (
 // TestServer is a helper struct for testing
 type TestServer struct {
 	*Server
-	logs *bytes.Buffer
+	logs    *bytes.Buffer
+	addr    string
+	cleanup func()
 }
 
 // newTestServer creates a new test server with captured logs
