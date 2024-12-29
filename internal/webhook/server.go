@@ -16,6 +16,23 @@ import (
 	"github.com/rs/zerolog"
 )
 
+const (
+	// readHeaderTimeout defines the maximum time allowed to read request headers
+	readHeaderTimeout = 10 * time.Second
+
+	// writeTimeout limits the time for writing the full response
+	writeTimeout = 10 * time.Second
+
+	// readTimeout sets the maximum time for reading the entire request
+	readTimeout = 10 * time.Second
+
+	// idleTimeout specifies how long an idle connection is kept open
+	idleTimeout = 120 * time.Second
+
+	// defaultGracefulTimeout is the default timeout for graceful server shutdown
+	defaultGracefulTimeout = 30 * time.Second
+)
+
 type Server struct {
 	logger          zerolog.Logger
 	config          *config.Config
@@ -60,7 +77,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		config:          cfg,
 		health:          newHealthState(realClock{}),
 		metrics:         m,
-		gracefulTimeout: 30 * time.Second,
+		gracefulTimeout: defaultGracefulTimeout,
 		serverMu:        sync.RWMutex{},
 	}, nil
 }
@@ -108,10 +125,10 @@ func (s *Server) Run() error {
 			InsecureSkipVerify:     false,
 			ClientAuth:             tls.VerifyClientCertIfGiven,
 		},
-		ReadHeaderTimeout: 10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		WriteTimeout:      writeTimeout,
+		ReadTimeout:       readTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 	s.serverMu.Unlock()
 
