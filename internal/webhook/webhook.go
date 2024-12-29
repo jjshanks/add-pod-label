@@ -1,3 +1,4 @@
+// webhook.go
 package webhook
 
 import (
@@ -68,10 +69,27 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 		Bool("has_hello_annotation", pod.Annotations != nil && pod.Annotations[annotationKey] != "").
 		Msg("Creating patch")
 
+	// Record annotation validation result
+	if pod.Annotations == nil {
+		s.metrics.recordAnnotationValidation(annotationMissing, pod.Namespace)
+	} else if val, ok := pod.Annotations[annotationKey]; ok {
+		if _, err := strconv.ParseBool(val); err != nil {
+			s.metrics.recordAnnotationValidation(annotationInvalid, pod.Namespace)
+		} else {
+			s.metrics.recordAnnotationValidation(annotationValid, pod.Namespace)
+		}
+	} else {
+		s.metrics.recordAnnotationValidation(annotationMissing, pod.Namespace)
+	}
+
+	// Check if labels should be added based on annotation
 	if !s.shouldAddLabel(pod) {
 		s.logger.Debug().
 			Str("pod", pod.Name).
 			Msg("Skipping label modification due to annotation")
+
+		s.metrics.recordLabelOperation(labelOperationSkipped, pod.Namespace)
+		// Return an empty patch array to indicate no changes
 		return json.Marshal([]patchOperation{})
 	}
 
@@ -80,6 +98,7 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 	if pod.Labels != nil {
 		for k, v := range pod.Labels {
 			if k == "" {
+				s.metrics.recordLabelOperation(labelOperationError, pod.Namespace)
 				return nil, newValidationError(
 					fmt.Errorf("empty label key found"),
 					fmt.Sprintf("pod/%s", pod.Name),
@@ -109,13 +128,19 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 	// Marshal patch with error context
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
+		s.metrics.recordLabelOperation(labelOperationError, pod.Namespace)
 		return nil, newPatchError(
 			fmt.Errorf("failed to marshal patch: %w", err),
 			fmt.Sprintf("pod/%s", pod.Name),
 		)
 	}
 
-	s.logger.Debug().Msg("Successfully created patch")
+	s.logger.Debug().
+		Str("pod", pod.Name).
+		Int("label_count", len(labels)).
+		Msg("Successfully created label patch")
+
+	s.metrics.recordLabelOperation(labelOperationSuccess, pod.Namespace)
 	return patchBytes, nil
 }
 

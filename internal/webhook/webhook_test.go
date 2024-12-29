@@ -7,8 +7,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,9 +42,18 @@ func newTestServer(t *testing.T) *TestServer {
 		LogLevel: "debug",
 	}
 
+	// Initialize metrics with a new registry
+	reg := prometheus.NewRegistry()
+	m, err := initMetrics(reg)
+	if err != nil {
+		t.Fatalf("Failed to initialize metrics: %v", err)
+	}
+
 	server := &Server{
-		logger: logger,
-		config: cfg,
+		logger:  logger,
+		config:  cfg,
+		metrics: m,
+		health:  newHealthState(realClock{}),
 	}
 
 	return &TestServer{
@@ -92,6 +104,7 @@ func TestHandleMutate(t *testing.T) {
 		expectPatch   bool
 		expectLogMsg  string
 		invalidReview bool
+		verifyMetrics func(*testing.T, *metrics)
 	}{
 		{
 			name: "valid pod without annotations",
@@ -108,6 +121,21 @@ func TestHandleMutate(t *testing.T) {
 			expectStatus: http.StatusOK,
 			expectPatch:  true,
 			expectLogMsg: "Successfully processed request",
+			verifyMetrics: func(t *testing.T, m *metrics) {
+				counter, err := m.labelOperationsTotal.GetMetricWith(prometheus.Labels{
+					"operation": labelOperationSuccess,
+					"namespace": "default",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+
+				counter, err = m.annotationValidationTotal.GetMetricWith(prometheus.Labels{
+					"result":    annotationMissing,
+					"namespace": "default",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			},
 		},
 		{
 			name: "pod with disable annotation",
@@ -127,6 +155,21 @@ func TestHandleMutate(t *testing.T) {
 			expectStatus: http.StatusOK,
 			expectPatch:  false,
 			expectLogMsg: "Skipping label modification",
+			verifyMetrics: func(t *testing.T, m *metrics) {
+				counter, err := m.labelOperationsTotal.GetMetricWith(prometheus.Labels{
+					"operation": labelOperationSkipped,
+					"namespace": "default",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+
+				counter, err = m.annotationValidationTotal.GetMetricWith(prometheus.Labels{
+					"result":    annotationValid,
+					"namespace": "default",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			},
 		},
 		{
 			name: "pod with invalid annotation value",
@@ -146,6 +189,21 @@ func TestHandleMutate(t *testing.T) {
 			expectStatus: http.StatusOK,
 			expectPatch:  true,
 			expectLogMsg: "Invalid annotation value",
+			verifyMetrics: func(t *testing.T, m *metrics) {
+				counter, err := m.labelOperationsTotal.GetMetricWith(prometheus.Labels{
+					"operation": labelOperationSuccess,
+					"namespace": "default",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+
+				counter, err = m.annotationValidationTotal.GetMetricWith(prometheus.Labels{
+					"result":    annotationInvalid,
+					"namespace": "default",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			},
 		},
 		{
 			name: "pod with existing labels",
@@ -165,6 +223,21 @@ func TestHandleMutate(t *testing.T) {
 			expectStatus: http.StatusOK,
 			expectPatch:  true,
 			expectLogMsg: "Successfully processed request",
+			verifyMetrics: func(t *testing.T, m *metrics) {
+				counter, err := m.labelOperationsTotal.GetMetricWith(prometheus.Labels{
+					"operation": labelOperationSuccess,
+					"namespace": "default",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+
+				counter, err = m.annotationValidationTotal.GetMetricWith(prometheus.Labels{
+					"result":    annotationMissing,
+					"namespace": "default",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			},
 		},
 		{
 			name: "invalid content type",
@@ -203,6 +276,21 @@ func TestHandleMutate(t *testing.T) {
 			expectStatus: http.StatusOK,
 			expectPatch:  true,
 			expectLogMsg: "Successfully processed request",
+			verifyMetrics: func(t *testing.T, m *metrics) {
+				counter, err := m.labelOperationsTotal.GetMetricWith(prometheus.Labels{
+					"operation": labelOperationSuccess,
+					"namespace": "default",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+
+				counter, err = m.annotationValidationTotal.GetMetricWith(prometheus.Labels{
+					"result":    annotationValid,
+					"namespace": "default",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			},
 		},
 	}
 
@@ -260,6 +348,11 @@ func TestHandleMutate(t *testing.T) {
 					// When skipping labels, we expect an empty patch array that serializes to "[]"
 					assert.Equal(t, "[]", string(response.Response.Patch))
 				}
+			}
+
+			// Verify metrics if needed
+			if tt.verifyMetrics != nil {
+				tt.verifyMetrics(t, ts.metrics)
 			}
 		})
 	}

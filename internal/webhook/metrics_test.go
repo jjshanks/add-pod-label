@@ -491,3 +491,123 @@ func TestIntegrationWithServer(t *testing.T) {
 		})
 	}
 }
+
+func TestLabelOperationMetrics(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation string
+		namespace string
+		verify    func(*testing.T, *metrics)
+	}{
+		{
+			name:      "successful label operation",
+			operation: labelOperationSuccess,
+			namespace: "default",
+			verify: func(t *testing.T, m *metrics) {
+				counter, err := m.labelOperationsTotal.GetMetricWith(prometheus.Labels{
+					"operation": labelOperationSuccess,
+					"namespace": "default",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			},
+		},
+		{
+			name:      "skipped label operation",
+			operation: labelOperationSkipped,
+			namespace: "test-ns",
+			verify: func(t *testing.T, m *metrics) {
+				counter, err := m.labelOperationsTotal.GetMetricWith(prometheus.Labels{
+					"operation": labelOperationSkipped,
+					"namespace": "test-ns",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			},
+		},
+		{
+			name:      "error label operation",
+			operation: labelOperationError,
+			namespace: "error-ns",
+			verify: func(t *testing.T, m *metrics) {
+				counter, err := m.labelOperationsTotal.GetMetricWith(prometheus.Labels{
+					"operation": labelOperationError,
+					"namespace": "error-ns",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := prometheus.NewRegistry()
+			m, err := initMetrics(reg)
+			require.NoError(t, err)
+
+			m.recordLabelOperation(tt.operation, tt.namespace)
+			tt.verify(t, m)
+		})
+	}
+}
+
+func TestAnnotationValidationMetrics(t *testing.T) {
+	tests := []struct {
+		name      string
+		result    string
+		namespace string
+		verify    func(*testing.T, *metrics)
+	}{
+		{
+			name:      "valid annotation",
+			result:    annotationValid,
+			namespace: "default",
+			verify: func(t *testing.T, m *metrics) {
+				counter, err := m.annotationValidationTotal.GetMetricWith(prometheus.Labels{
+					"result":    annotationValid,
+					"namespace": "default",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			},
+		},
+		{
+			name:      "invalid annotation",
+			result:    annotationInvalid,
+			namespace: "test-ns",
+			verify: func(t *testing.T, m *metrics) {
+				counter, err := m.annotationValidationTotal.GetMetricWith(prometheus.Labels{
+					"result":    annotationInvalid,
+					"namespace": "test-ns",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			},
+		},
+		{
+			name:      "missing annotation",
+			result:    annotationMissing,
+			namespace: "missing-ns",
+			verify: func(t *testing.T, m *metrics) {
+				counter, err := m.annotationValidationTotal.GetMetricWith(prometheus.Labels{
+					"result":    annotationMissing,
+					"namespace": "missing-ns",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := prometheus.NewRegistry()
+			m, err := initMetrics(reg)
+			require.NoError(t, err)
+
+			m.recordAnnotationValidation(tt.result, tt.namespace)
+			tt.verify(t, m)
+		})
+	}
+}

@@ -2,22 +2,11 @@
 
 set -euo pipefail
 
+# Source common test utilities
+source "$(dirname "$0")/utils.sh"
+
 # Use a high port number that doesn't require root
 LOCAL_PORT=18443
-
-# Cleanup function to handle multiple cleanup tasks
-cleanup() {
-    echo "Cleaning up test resources..."
-    # Kill port forwarding if it exists
-    if [ -n "${PORT_FORWARD_PID:-}" ]; then
-        echo "Stopping port forwarding process..."
-        kill $PORT_FORWARD_PID || true
-        wait $PORT_FORWARD_PID 2>/dev/null || true
-    fi
-    # Delete test resources
-    echo "Deleting test deployments..."
-    kubectl delete -f test/e2e/manifests/test-deployment.yaml --ignore-not-found
-}
 
 # Set up cleanup on script exit
 trap cleanup EXIT
@@ -44,33 +33,13 @@ echo "Setting up port forwarding..."
 kubectl port-forward -n webhook-test service/pod-label-webhook $LOCAL_PORT:$WEBHOOK_PORT &
 PORT_FORWARD_PID=$!
 
-# Wait for port forwarding to be ready
-echo "Waiting for port forwarding to be established..."
-for i in {1..10}; do
-    if nc -z localhost $LOCAL_PORT; then
-        break
-    fi
-    if [ $i -eq 10 ]; then
-        echo "ERROR: Port forwarding failed to establish"
-        exit 1
-    fi
-    sleep 1
-done
-
-echo "Testing liveness endpoint..."
-if ! curl -sk https://localhost:$LOCAL_PORT/healthz | grep -q "OK"; then
-    echo "ERROR: Liveness check failed"
+# Wait for port forwarding to be established
+if ! wait_for_port $LOCAL_PORT; then
+    echo "ERROR: Port forwarding failed to establish"
     exit 1
 fi
 
-echo "Testing readiness endpoint..."
-if ! curl -sk https://localhost:$LOCAL_PORT/readyz | grep -q "OK"; then
-    echo "ERROR: Readiness check failed"
-    exit 1
-fi
-
-echo "Health checks passed successfully!"
-
+# Verify the webhook is labeling pods correctly
 echo "Checking for expected label presence..."
 if ! kubectl get pods -n default -l app=integ-test,hello=world --no-headers 2>/dev/null | grep -q .; then
     echo "ERROR: Label 'hello=world' not found when it should be present"
@@ -83,5 +52,39 @@ if kubectl get pods -n default -l app=integ-test-no-label,hello=world --no-heade
     exit 1
 fi
 
+echo "Testing metrics endpoint..."
+metrics_output=$(curl -sk https://localhost:$LOCAL_PORT/metrics)
+if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to fetch metrics"
+    exit 1
+fi
+
+echo "Initial metrics check..."
+echo "Got $(echo "$metrics_output" | wc -l) lines of metrics"
+
+# Verify metrics
+echo "Verifying metrics..."
+
+# Wait a moment for metrics to be available
+sleep 5
+
+# Check readiness status first
+if ! check_metric "pod_label_webhook_readiness_status" "" "1" "Webhook readiness" "$LOCAL_PORT"; then
+    exit 1
+fi
+
+# Check request metrics
+if ! check_metric "pod_label_webhook_requests_total" 'method="POST",path="/mutate",status="200"' "1" "Successful mutate requests" "$LOCAL_PORT"; then
+    exit 1
+fi
+
+# Check label operations
+if ! check_metric "pod_label_webhook_label_operations_total" 'namespace="default",operation="success"' "1" "Successful label operations" "$LOCAL_PORT"; then
+    exit 1
+fi
+
+if ! check_metric "pod_label_webhook_label_operations_total" 'namespace="default",operation="skipped"' "1" "Skipped label operations" "$LOCAL_PORT"; then
+    exit 1
+fi
+
 echo "All tests passed successfully!"
-exit 0
