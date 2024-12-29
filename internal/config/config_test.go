@@ -1,10 +1,10 @@
-// pkg/config/config_test.go
 package config
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
@@ -25,59 +25,59 @@ func TestNew(t *testing.T) {
 func TestConfig_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
-		config  *Config
+		setup   func(*Config) // Function to modify base config
 		wantErr bool
 		errMsg  string
 	}{
 		{
 			name: "valid configuration",
-			config: &Config{
-				Address:  "0.0.0.0:8443",
-				LogLevel: "info",
+			setup: func(c *Config) {
+				c.Address = "0.0.0.0:8443"
+				c.LogLevel = "info"
 			},
 			wantErr: false,
 		},
 		{
 			name: "invalid log level",
-			config: &Config{
-				Address:  "0.0.0.0:8443",
-				LogLevel: "invalid",
+			setup: func(c *Config) {
+				c.Address = "0.0.0.0:8443"
+				c.LogLevel = "invalid"
 			},
 			wantErr: true,
 			errMsg:  "invalid log level",
 		},
 		{
 			name: "invalid address format",
-			config: &Config{
-				Address:  "invalid",
-				LogLevel: "info",
+			setup: func(c *Config) {
+				c.Address = "invalid"
+				c.LogLevel = "info"
 			},
 			wantErr: true,
 			errMsg:  "invalid address format",
 		},
 		{
 			name: "invalid port",
-			config: &Config{
-				Address:  "0.0.0.0:999999",
-				LogLevel: "info",
+			setup: func(c *Config) {
+				c.Address = "0.0.0.0:999999"
+				c.LogLevel = "info"
 			},
 			wantErr: true,
 			errMsg:  "invalid port",
 		},
 		{
 			name: "invalid IP",
-			config: &Config{
-				Address:  "256.256.256.256:8443",
-				LogLevel: "info",
+			setup: func(c *Config) {
+				c.Address = "256.256.256.256:8443"
+				c.LogLevel = "info"
 			},
 			wantErr: true,
 			errMsg:  "invalid IP address",
 		},
 		{
 			name: "valid localhost address",
-			config: &Config{
-				Address:  "127.0.0.1:8443",
-				LogLevel: "info",
+			setup: func(c *Config) {
+				c.Address = "127.0.0.1:8443"
+				c.LogLevel = "info"
 			},
 			wantErr: false,
 		},
@@ -85,7 +85,12 @@ func TestConfig_Validate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
+			// Start with a new config with defaults
+			cfg := New()
+			// Apply test-specific modifications
+			tt.setup(cfg)
+
+			err := cfg.Validate()
 			if tt.wantErr {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errMsg)
@@ -400,6 +405,139 @@ console: true
 			assert.Equal(t, tt.want.KeyFile, got.KeyFile)
 			assert.Equal(t, tt.want.LogLevel, got.LogLevel)
 			assert.Equal(t, tt.want.Console, got.Console)
+		})
+	}
+}
+
+func TestConfig_Validate_GracefulTimeout(t *testing.T) {
+	tests := []struct {
+		name            string
+		gracefulTimeout time.Duration
+		wantErr         bool
+		errMsg          string
+	}{
+		{
+			name:            "valid timeout",
+			gracefulTimeout: 30 * time.Second,
+			wantErr:         false,
+		},
+		{
+			name:            "zero timeout",
+			gracefulTimeout: 0,
+			wantErr:         true,
+			errMsg:          "graceful timeout must be positive",
+		},
+		{
+			name:            "negative timeout",
+			gracefulTimeout: -5 * time.Second,
+			wantErr:         true,
+			errMsg:          "graceful timeout must be positive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := New() // Start with defaults
+			cfg.Address = "127.0.0.1:8443"
+			cfg.LogLevel = "info"
+			cfg.GracefulTimeout = tt.gracefulTimeout
+
+			err := cfg.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMsg)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_GracefulTimeout(t *testing.T) {
+	// Create temporary directory for test files
+	tmpDir, err := os.MkdirTemp("", "config-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	tests := []struct {
+		name       string
+		configFile string
+		envVars    map[string]string
+		want       time.Duration
+		wantErr    bool
+	}{
+		{
+			name:       "default timeout",
+			configFile: "",
+			want:       30 * time.Second,
+		},
+		{
+			name:       "config file with duration string",
+			configFile: filepath.Join(tmpDir, "duration-config.yaml"),
+			want:       45 * time.Second,
+		},
+		{
+			name:       "config file with seconds integer",
+			configFile: filepath.Join(tmpDir, "seconds-config.yaml"),
+			want:       60 * time.Second,
+		},
+		{
+			name: "env var with duration string",
+			envVars: map[string]string{
+				"WEBHOOK_GRACEFUL_TIMEOUT": "90s",
+			},
+			want: 90 * time.Second,
+		},
+		{
+			name: "env var with seconds integer",
+			envVars: map[string]string{
+				"WEBHOOK_GRACEFUL_TIMEOUT": "120",
+			},
+			want: 120 * time.Second,
+		},
+		{
+			name: "invalid duration string",
+			envVars: map[string]string{
+				"WEBHOOK_GRACEFUL_TIMEOUT": "invalid",
+			},
+			wantErr: true,
+		},
+	}
+
+	// Create test config files
+	durationConfig := `
+graceful-timeout: 45s
+`
+	err = os.WriteFile(filepath.Join(tmpDir, "duration-config.yaml"), []byte(durationConfig), 0644)
+	require.NoError(t, err)
+
+	secondsConfig := `
+graceful-timeout: 60
+`
+	err = os.WriteFile(filepath.Join(tmpDir, "seconds-config.yaml"), []byte(secondsConfig), 0644)
+	require.NoError(t, err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset viper
+			viper.Reset()
+
+			// Set environment variables
+			for k, v := range tt.envVars {
+				err := os.Setenv(k, v)
+				require.NoError(t, err)
+				defer os.Unsetenv(k)
+			}
+
+			// Load config
+			got, err := LoadConfig(tt.configFile)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got.GracefulTimeout)
 		})
 	}
 }
