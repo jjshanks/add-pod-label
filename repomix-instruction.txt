@@ -1,10 +1,10 @@
 Project Goals
 -------
-- Be an example of a complete and well-rounded go project
+- Be an example of a complete and well-rounded Go project
 
 Coding Guidelines:
 --------
-- Follow the go style guide and standard go project layout
+- Follow the Go style guide and standard go project layout
 - Suggest splitting files into smaller, focused units when appropriate
 - All time based code must use the clock interface
 - Add comments for non-obvious logic. Keep all text in English
