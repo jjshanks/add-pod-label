@@ -34,6 +34,24 @@ type patchOperation struct {
 	Value interface{} `json:"value,omitempty"`
 }
 
+// recordAnnotationMetrics records metrics related to annotation validation
+func (s *Server) recordAnnotationMetrics(pod *corev1.Pod) {
+	if pod.Annotations == nil {
+		s.metrics.recordAnnotationValidation(annotationMissing, pod.Namespace)
+		return
+	}
+
+	if val, ok := pod.Annotations[annotationKey]; ok {
+		if _, err := strconv.ParseBool(val); err != nil {
+			s.metrics.recordAnnotationValidation(annotationInvalid, pod.Namespace)
+		} else {
+			s.metrics.recordAnnotationValidation(annotationValid, pod.Namespace)
+		}
+	} else {
+		s.metrics.recordAnnotationValidation(annotationMissing, pod.Namespace)
+	}
+}
+
 func (s *Server) shouldAddLabel(pod *corev1.Pod) bool {
 	val, ok := pod.Annotations[annotationKey]
 	if !ok {
@@ -53,6 +71,25 @@ func (s *Server) shouldAddLabel(pod *corev1.Pod) bool {
 	return parsed
 }
 
+// createLabelsMap creates a map of labels, including existing ones and the hello label
+func (s *Server) createLabelsMap(pod *corev1.Pod) (map[string]string, error) {
+	labels := make(map[string]string)
+	if pod.Labels != nil {
+		for k, v := range pod.Labels {
+			if k == "" {
+				s.metrics.recordLabelOperation(labelOperationError, pod.Namespace)
+				return nil, newValidationError(
+					fmt.Errorf("empty label key found"),
+					fmt.Sprintf("pod/%s", pod.Name),
+				)
+			}
+			labels[k] = v
+		}
+	}
+	labels["hello"] = "world"
+	return labels, nil
+}
+
 func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 	if pod == nil {
 		return nil, &WebhookError{
@@ -68,29 +105,21 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 		Bool("has_hello_annotation", pod.Annotations != nil && pod.Annotations[annotationKey] != "").
 		Msg("Creating patch")
 
+	s.recordAnnotationMetrics(pod)
+
 	if !s.shouldAddLabel(pod) {
 		s.logger.Debug().
 			Str("pod", pod.Name).
 			Msg("Skipping label modification due to annotation")
+		s.metrics.recordLabelOperation(labelOperationSkipped, pod.Namespace)
 		return json.Marshal([]patchOperation{})
 	}
 
-	// Create labels map with validation
-	labels := make(map[string]string)
-	if pod.Labels != nil {
-		for k, v := range pod.Labels {
-			if k == "" {
-				return nil, newValidationError(
-					fmt.Errorf("empty label key found"),
-					fmt.Sprintf("pod/%s", pod.Name),
-				)
-			}
-			labels[k] = v
-		}
+	labels, err := s.createLabelsMap(pod)
+	if err != nil {
+		return nil, err
 	}
-	labels["hello"] = "world"
 
-	// Create patch operations with validation
 	var patch []patchOperation
 	if pod.Labels == nil {
 		patch = []patchOperation{{
@@ -106,16 +135,21 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 		}}
 	}
 
-	// Marshal patch with error context
 	patchBytes, err := json.Marshal(patch)
 	if err != nil {
+		s.metrics.recordLabelOperation(labelOperationError, pod.Namespace)
 		return nil, newPatchError(
 			fmt.Errorf("failed to marshal patch: %w", err),
 			fmt.Sprintf("pod/%s", pod.Name),
 		)
 	}
 
-	s.logger.Debug().Msg("Successfully created patch")
+	s.logger.Debug().
+		Str("pod", pod.Name).
+		Int("label_count", len(labels)).
+		Msg("Successfully created label patch")
+
+	s.metrics.recordLabelOperation(labelOperationSuccess, pod.Namespace)
 	return patchBytes, nil
 }
 

@@ -1,3 +1,4 @@
+// metrics.go
 package webhook
 
 import (
@@ -13,6 +14,16 @@ import (
 
 const (
 	metricsNamespace = "pod_label_webhook"
+
+	// Label operation results
+	labelOperationSuccess = "success"
+	labelOperationSkipped = "skipped"
+	labelOperationError   = "error"
+
+	// Annotation states
+	annotationValid   = "valid"
+	annotationInvalid = "invalid"
+	annotationMissing = "missing"
 )
 
 var (
@@ -22,12 +33,34 @@ var (
 
 // metrics holds our Prometheus metrics
 type metrics struct {
-	requestCounter  *prometheus.CounterVec
+	// requestCounter tracks the total number of requests processed
+	// Labels: path, method, status
+	requestCounter *prometheus.CounterVec
+
+	// requestDuration tracks the duration of requests
+	// Labels: path, method
 	requestDuration *prometheus.HistogramVec
-	errorCounter    *prometheus.CounterVec
-	readinessGauge  prometheus.Gauge
-	livenessGauge   prometheus.Gauge
-	registry        *prometheus.Registry
+
+	// errorCounter tracks the total number of errors encountered
+	// Labels: path, method, status
+	errorCounter *prometheus.CounterVec
+
+	// readinessGauge indicates the current readiness status (1 ready, 0 not ready)
+	readinessGauge prometheus.Gauge
+
+	// livenessGauge indicates the current liveness status (1 alive, 0 not alive)
+	livenessGauge prometheus.Gauge
+
+	// labelOperationsTotal tracks the number of label operations
+	// Labels: operation (success/skipped/error), namespace
+	labelOperationsTotal *prometheus.CounterVec
+
+	// annotationValidationTotal tracks annotation validation results
+	// Labels: result (valid/invalid/missing), namespace
+	annotationValidationTotal *prometheus.CounterVec
+
+	// registry is the Prometheus registry used to manage these metrics
+	registry *prometheus.Registry
 }
 
 // initMetrics initializes Prometheus metrics with an optional registry
@@ -56,7 +89,7 @@ func initMetrics(reg prometheus.Registerer) (*metrics, error) {
 		prometheus.HistogramOpts{
 			Namespace: metricsNamespace,
 			Name:      "request_duration_seconds",
-			Help:      "Request duration in seconds",
+			Help:      "Duration of webhook request processing in seconds",
 			Buckets:   webhookDurationBuckets,
 		},
 		[]string{"path", "method"},
@@ -102,6 +135,33 @@ func initMetrics(reg prometheus.Registerer) (*metrics, error) {
 		return nil, fmt.Errorf("could not register liveness gauge: %w", err)
 	}
 
+	// Initialize label operations counter
+	m.labelOperationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricsNamespace,
+			Name:      "label_operations_total",
+			Help:      "Total number of label operations by result and namespace",
+		},
+		[]string{"operation", "namespace"},
+	)
+	if err := reg.Register(m.labelOperationsTotal); err != nil {
+		return nil, fmt.Errorf("could not register label operations counter: %w", err)
+	}
+
+	// Initialize annotation validation counter
+	m.annotationValidationTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metricsNamespace,
+			Name:      "annotation_validation_total",
+			Help:      "Total number of annotation validation results by outcome and namespace",
+		},
+		[]string{"result", "namespace"},
+	)
+	if err := reg.Register(m.annotationValidationTotal); err != nil {
+		return nil, fmt.Errorf("could not register annotation validation counter: %w", err)
+	}
+
+	// Store registry if a custom one was used
 	if r, ok := reg.(*prometheus.Registry); ok {
 		m.registry = r
 	}
@@ -146,24 +206,18 @@ func (m *metrics) metricsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// statusRecorder wraps http.ResponseWriter to capture status code
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
+// recordLabelOperation records the result of a label operation for a given namespace
+func (m *metrics) recordLabelOperation(operation string, namespace string) {
+	m.labelOperationsTotal.WithLabelValues(operation, namespace).Inc()
 }
 
-func newStatusRecorder(w http.ResponseWriter) *statusRecorder {
-	return &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-}
-
-func (r *statusRecorder) WriteHeader(status int) {
-	r.status = status
-	r.ResponseWriter.WriteHeader(status)
+// recordAnnotationValidation records the result of annotation validation for a given namespace
+func (m *metrics) recordAnnotationValidation(result string, namespace string) {
+	m.annotationValidationTotal.WithLabelValues(result, namespace).Inc()
 }
 
 // updateHealthMetrics updates the health-related metrics
 func (m *metrics) updateHealthMetrics(ready, alive bool) {
-	// Convert bool to float64 (1 for true, 0 for false)
 	if ready {
 		m.readinessGauge.Set(1)
 	} else {
@@ -183,4 +237,21 @@ func (m *metrics) handler() http.Handler {
 		return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
 	}
 	return promhttp.Handler()
+}
+
+// statusRecorder wraps http.ResponseWriter to capture the HTTP status code
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+// newStatusRecorder creates a new statusRecorder
+func newStatusRecorder(w http.ResponseWriter) *statusRecorder {
+	return &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+}
+
+// WriteHeader captures the written status code
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
 }
