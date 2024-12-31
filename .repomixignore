@@ -2,3 +2,4 @@
 # Example:
 # *.log
 # tmp/
+go.sum
