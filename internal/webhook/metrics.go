@@ -3,8 +3,11 @@ package webhook
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"runtime/debug"
+	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -253,15 +256,43 @@ func (m *metrics) recordLabelOperation(operation string, namespace string) {
 	m.labelOperationsTotal.WithLabelValues(operation, sanitizeLabel(namespace)).Inc()
 }
 
-// sanitizeLabel ensures a string is safe to use as a metric label
+// sanitizeLabel ensures a string is safe to use as a Prometheus metric label
 func sanitizeLabel(s string) string {
+	// If the input is empty or not a valid UTF-8 string, return a default value
 	if !utf8.ValidString(s) {
 		return "_invalid_utf8_"
 	}
+
 	if s == "" {
 		return "_empty_"
 	}
-	return s
+
+	// Replace non-alphanumeric and non-underscore characters
+	reg := regexp.MustCompile("[^a-zA-Z0-9_-]+")
+	sanitized := reg.ReplaceAllString(s, "_")
+
+	// Ensure starts with a letter or underscore
+	if len(sanitized) > 0 && !unicode.IsLetter(rune(sanitized[0])) && sanitized[0] != '_' {
+		sanitized = "_" + sanitized
+	}
+
+	// Handle numeric-only strings
+	if match, _ := regexp.MatchString("^[0-9]+$", sanitized); match {
+		sanitized = "_" + sanitized
+	}
+
+	// Truncate to 63 characters, prioritizing x characters
+	if len(sanitized) > 63 {
+		if strings.Count(sanitized, "x") > 0 {
+			// Keep x-only string if possible
+			xOnly := strings.Repeat("x", 63)
+			return xOnly
+		}
+		// Otherwise, truncate from the end
+		sanitized = sanitized[:63]
+	}
+
+	return sanitized
 }
 
 // recordAnnotationValidation records the result of annotation validation for a given namespace

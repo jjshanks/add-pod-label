@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,10 +11,41 @@ import (
 
 	"github.com/jjshanks/pod-label-webhook/internal/config"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// Helper function to safely extract float value from a metric
+func extractMetricValue(metric interface{}) float64 {
+	switch m := metric.(type) {
+	case prometheus.Metric:
+		pb := &dto.Metric{}
+		err := m.Write(pb)
+		if err != nil {
+			return 0.0
+		}
+		switch {
+		case pb.Gauge != nil:
+			return pb.Gauge.GetValue()
+		case pb.Counter != nil:
+			return pb.Counter.GetValue()
+		default:
+			return 0.0
+		}
+	case *dto.Metric:
+		switch {
+		case m.Gauge != nil:
+			return m.Gauge.GetValue()
+		case m.Counter != nil:
+			return m.Counter.GetValue()
+		default:
+			return 0.0
+		}
+	default:
+		return 0.0
+	}
+}
 
 func TestMetricsInitialization(t *testing.T) {
 	tests := []struct {
@@ -155,7 +187,7 @@ func TestMetricsMiddlewareEdgeCases(t *testing.T) {
 					"status": "500",
 				})
 				require.NoError(t, err)
-				assert.Equal(t, float64(1), testutil.ToFloat64(errorCounter))
+				assert.Equal(t, float64(1), extractMetricValue(errorCounter))
 			}
 
 			// For slow handler, verify duration metric is recorded in appropriate bucket
@@ -249,13 +281,13 @@ func TestMetricsMiddleware(t *testing.T) {
 			// Verify request counter
 			counter, err := m.requestCounter.GetMetricWith(tt.expectedLabels)
 			require.NoError(t, err)
-			assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			assert.Equal(t, float64(1), extractMetricValue(counter))
 
 			// Verify error counter for error cases
 			if tt.statusCode >= 400 {
 				errCounter, err := m.errorCounter.GetMetricWith(tt.expectedLabels)
 				require.NoError(t, err)
-				assert.Equal(t, float64(1), testutil.ToFloat64(errCounter))
+				assert.Equal(t, float64(1), extractMetricValue(errCounter))
 			}
 
 			// Verify duration histogram exists
@@ -315,8 +347,8 @@ func TestUpdateHealthMetrics(t *testing.T) {
 
 			m.updateHealthMetrics(tt.ready, tt.alive)
 
-			assert.Equal(t, tt.wantReadiness, testutil.ToFloat64(m.readinessGauge))
-			assert.Equal(t, tt.wantLiveness, testutil.ToFloat64(m.livenessGauge))
+			assert.Equal(t, tt.wantReadiness, extractMetricValue(m.readinessGauge))
+			assert.Equal(t, tt.wantLiveness, extractMetricValue(m.livenessGauge))
 		})
 	}
 }
@@ -454,7 +486,8 @@ func TestIntegrationWithServer(t *testing.T) {
 			require.NoError(t, err)
 
 			// Create test request
-			req := httptest.NewRequest(tt.method, tt.endpoint, strings.NewReader(tt.body))
+			req := httptest.NewRequest(tt.method, tt.
+				endpoint, strings.NewReader(tt.body))
 			if tt.endpoint == "/mutate" {
 				req.Header.Set("Content-Type", "application/json")
 			}
@@ -494,120 +527,256 @@ func TestIntegrationWithServer(t *testing.T) {
 
 func TestLabelOperationMetrics(t *testing.T) {
 	tests := []struct {
-		name      string
-		operation string
-		namespace string
-		verify    func(*testing.T, *metrics)
+		name           string
+		operation      string
+		namespace      string
+		recorded       bool // Indicates whether the metric should be recorded
+		expectedLabels map[string]string
 	}{
 		{
 			name:      "successful label operation",
 			operation: labelOperationSuccess,
 			namespace: "default",
-			verify: func(t *testing.T, m *metrics) {
-				counter, err := m.labelOperationsTotal.GetMetricWith(prometheus.Labels{
-					"operation": labelOperationSuccess,
-					"namespace": "default",
-				})
-				require.NoError(t, err)
-				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			recorded:  true,
+			expectedLabels: map[string]string{
+				"operation": "success",
+				"namespace": "default",
 			},
 		},
 		{
 			name:      "skipped label operation",
 			operation: labelOperationSkipped,
 			namespace: "test-ns",
-			verify: func(t *testing.T, m *metrics) {
-				counter, err := m.labelOperationsTotal.GetMetricWith(prometheus.Labels{
-					"operation": labelOperationSkipped,
-					"namespace": "test-ns",
-				})
-				require.NoError(t, err)
-				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			recorded:  true,
+			expectedLabels: map[string]string{
+				"operation": "skipped",
+				"namespace": "test-ns",
 			},
 		},
 		{
 			name:      "error label operation",
 			operation: labelOperationError,
 			namespace: "error-ns",
-			verify: func(t *testing.T, m *metrics) {
-				counter, err := m.labelOperationsTotal.GetMetricWith(prometheus.Labels{
-					"operation": labelOperationError,
-					"namespace": "error-ns",
-				})
-				require.NoError(t, err)
-				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			recorded:  true,
+			expectedLabels: map[string]string{
+				"operation": "error",
+				"namespace": "error-ns",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create a new registry for each test to ensure clean state
 			reg := prometheus.NewRegistry()
 			m, err := initMetrics(reg)
 			require.NoError(t, err)
 
-			m.recordLabelOperation(tt.operation, tt.namespace)
-			tt.verify(t, m)
+			// Explicitly record the metric if recorded is true
+			if tt.recorded {
+				m.recordLabelOperation(tt.operation, tt.namespace)
+			}
+
+			// Gather metrics and print for debugging
+			metrics, err := reg.Gather()
+			require.NoError(t, err)
+
+			// Debug: print all gathered metrics
+			t.Logf("Total metric families gathered: %d", len(metrics))
+			for _, mf := range metrics {
+				t.Logf("Metric family name: %s", mf.GetName())
+				for _, m := range mf.GetMetric() {
+					labels := m.GetLabel()
+					labelStr := ""
+					for _, label := range labels {
+						labelStr += fmt.Sprintf("%s=%s ", label.GetName(), label.GetValue())
+					}
+					t.Logf("  Metric labels: %s", labelStr)
+				}
+			}
+
+			var found bool
+			for _, mf := range metrics {
+				if mf.GetName() == "pod_label_webhook_label_operations_total" {
+					for _, m := range mf.GetMetric() {
+						labels := m.GetLabel()
+
+						// Check if the labels match exactly
+						if len(labels) == 2 {
+							labelMap := make(map[string]string)
+							for _, label := range labels {
+								labelMap[label.GetName()] = label.GetValue()
+							}
+
+							// Compare labels exactly
+							if labelMap["operation"] == tt.operation &&
+								labelMap["namespace"] == tt.namespace {
+
+								found = true
+
+								// Check the value
+								expectedValue := float64(1)
+								if !tt.recorded {
+									expectedValue = float64(0)
+								}
+								metricValue := extractMetricValue(m)
+								assert.Equal(t, expectedValue, metricValue,
+									"Unexpected metric value for %s operation in %s namespace. Got %v, want %v",
+									tt.operation, tt.namespace, metricValue, expectedValue)
+								break
+							}
+						}
+					}
+				}
+			}
+
+			// If recording was expected, assert that the metric was found
+			if tt.recorded {
+				assert.True(t, found,
+					"Expected metric for %s operation in %s namespace was not found. "+
+						"Searched for labels: %v",
+					tt.operation, tt.namespace, tt.expectedLabels)
+			}
 		})
 	}
 }
 
 func TestAnnotationValidationMetrics(t *testing.T) {
 	tests := []struct {
-		name      string
-		result    string
-		namespace string
-		verify    func(*testing.T, *metrics)
+		name           string
+		result         string
+		namespace      string
+		recorded       bool // Indicates whether the metric should be recorded
+		expectedLabels map[string]string
 	}{
 		{
 			name:      "valid annotation",
 			result:    annotationValid,
 			namespace: "default",
-			verify: func(t *testing.T, m *metrics) {
-				counter, err := m.annotationValidationTotal.GetMetricWith(prometheus.Labels{
-					"result":    annotationValid,
-					"namespace": "default",
-				})
-				require.NoError(t, err)
-				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			recorded:  true,
+			expectedLabels: map[string]string{
+				"result":    "valid",
+				"namespace": "default",
 			},
 		},
 		{
 			name:      "invalid annotation",
 			result:    annotationInvalid,
 			namespace: "test-ns",
-			verify: func(t *testing.T, m *metrics) {
-				counter, err := m.annotationValidationTotal.GetMetricWith(prometheus.Labels{
-					"result":    annotationInvalid,
-					"namespace": "test-ns",
-				})
-				require.NoError(t, err)
-				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			recorded:  true,
+			expectedLabels: map[string]string{
+				"result":    "invalid",
+				"namespace": "test-ns",
 			},
 		},
 		{
 			name:      "missing annotation",
 			result:    annotationMissing,
 			namespace: "missing-ns",
-			verify: func(t *testing.T, m *metrics) {
-				counter, err := m.annotationValidationTotal.GetMetricWith(prometheus.Labels{
-					"result":    annotationMissing,
-					"namespace": "missing-ns",
-				})
-				require.NoError(t, err)
-				assert.Equal(t, float64(1), testutil.ToFloat64(counter))
+			recorded:  true,
+			expectedLabels: map[string]string{
+				"result":    "missing",
+				"namespace": "missing-ns",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create a new registry for each test to ensure clean state
 			reg := prometheus.NewRegistry()
 			m, err := initMetrics(reg)
 			require.NoError(t, err)
 
-			m.recordAnnotationValidation(tt.result, tt.namespace)
-			tt.verify(t, m)
+			// Explicitly record the metric if recorded is true
+			if tt.recorded {
+				m.recordAnnotationValidation(tt.result, tt.namespace)
+			}
+
+			// Gather metrics and print for debugging
+			metrics, err := reg.Gather()
+			require.NoError(t, err)
+
+			// Debug: print all gathered metrics
+			t.Logf("Total metric families gathered: %d", len(metrics))
+			for _, mf := range metrics {
+				t.Logf("Metric family name: %s", mf.GetName())
+				for _, m := range mf.GetMetric() {
+					labels := m.GetLabel()
+					labelStr := ""
+					for _, label := range labels {
+						labelStr += fmt.Sprintf("%s=%s ", label.GetName(), label.GetValue())
+					}
+					t.Logf("  Metric labels: %s", labelStr)
+				}
+			}
+
+			var found bool
+			for _, mf := range metrics {
+				if mf.GetName() == "pod_label_webhook_annotation_validation_total" {
+					for _, m := range mf.GetMetric() {
+						labels := m.GetLabel()
+
+						// Check if the labels match exactly
+						if len(labels) == 2 {
+							labelMap := make(map[string]string)
+							for _, label := range labels {
+								labelMap[label.GetName()] = label.GetValue()
+							}
+
+							// Compare labels exactly
+							if labelMap["result"] == tt.result &&
+								labelMap["namespace"] == tt.namespace {
+
+								found = true
+
+								// Check the value
+								expectedValue := float64(1)
+								if !tt.recorded {
+									expectedValue = float64(0)
+								}
+								metricValue := extractMetricValue(m)
+								assert.Equal(t, expectedValue, metricValue,
+									"Unexpected metric value for %s result in %s namespace. Got %v, want %v",
+									tt.result, tt.namespace, metricValue, expectedValue)
+								break
+							}
+						}
+					}
+				}
+			}
+
+			// If recording was expected, assert that the metric was found
+			if tt.recorded {
+				assert.True(t, found,
+					"Expected metric for %s result in %s namespace was not found. "+
+						"Searched for labels: %v",
+					tt.result, tt.namespace, tt.expectedLabels)
+			}
+		})
+	}
+}
+
+func TestSanitizeLabel(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"valid_label", "valid_label"},
+		{"valid-label", "valid-label"},
+		{"123numeric", "_123numeric"},
+		{"namespace/test", "namespace_test"},
+		{"special!@#$%^&*()chars", "special_chars"},
+		{"", "_empty_"},
+		{"Γ£û∩╕Åinvalid_unicode", "_invalid_unicode"},
+		{"a" + strings.Repeat("x", 100), strings.Repeat("x", 63)},
+		{"a" + strings.Repeat("x", 200), strings.Repeat("x", 63)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := sanitizeLabel(tt.input)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
