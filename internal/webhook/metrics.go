@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"time"
+	"unicode/utf8"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -249,12 +250,23 @@ func (m *metrics) metricsMiddleware(next http.Handler) http.Handler {
 
 // recordLabelOperation records the result of a label operation for a given namespace
 func (m *metrics) recordLabelOperation(operation string, namespace string) {
-	m.labelOperationsTotal.WithLabelValues(operation, namespace).Inc()
+	m.labelOperationsTotal.WithLabelValues(operation, sanitizeLabel(namespace)).Inc()
+}
+
+// sanitizeLabel ensures a string is safe to use as a metric label
+func sanitizeLabel(s string) string {
+	if !utf8.ValidString(s) {
+		return "_invalid_utf8_"
+	}
+	if s == "" {
+		return "_empty_"
+	}
+	return s
 }
 
 // recordAnnotationValidation records the result of annotation validation for a given namespace
 func (m *metrics) recordAnnotationValidation(result string, namespace string) {
-	m.annotationValidationTotal.WithLabelValues(result, namespace).Inc()
+	m.annotationValidationTotal.WithLabelValues(result, sanitizeLabel(namespace)).Inc()
 }
 
 // updateHealthMetrics updates the health-related metrics
