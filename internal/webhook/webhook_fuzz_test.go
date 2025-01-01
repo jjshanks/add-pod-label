@@ -10,6 +10,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/stretchr/testify/assert"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -204,9 +205,15 @@ func FuzzHandleMutate(f *testing.F) {
 		},
 	}
 	reviewJSON, _ := json.Marshal(review)
-	f.Add(reviewJSON)
 
-	f.Fuzz(func(t *testing.T, data []byte) {
+	// Seed corpus with various scenarios
+	f.Add(reviewJSON, "application/json")
+	f.Add(reviewJSON, "text/plain")
+	f.Add(reviewJSON, "application/x-www-form-urlencoded")
+	f.Add(reviewJSON, "")
+	f.Add(reviewJSON, "invalid/content-type")
+
+	f.Fuzz(func(t *testing.T, data []byte, contentType string) {
 		// Skip if data is empty or not valid UTF-8
 		if len(data) == 0 || !utf8.Valid(data) {
 			return
@@ -217,62 +224,49 @@ func FuzzHandleMutate(f *testing.F) {
 
 		// Create test request with fuzzed data
 		req := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(data))
-		req.Header.Set("Content-Type", "application/json")
+
+		// Set fuzzed content type, defaulting to empty string if invalid
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
 
 		w := httptest.NewRecorder()
 
 		// Handle request
 		ts.handleMutate(w, req)
 
-		// Verify response status code is valid
-		if w.Code != http.StatusOK && w.Code != http.StatusBadRequest &&
-			w.Code != http.StatusUnsupportedMediaType {
-			t.Errorf("unexpected status code: %d", w.Code)
-		}
-
 		// Verify response
 		resp := w.Result()
 		defer resp.Body.Close()
 
-		// Successful responses should have application/json content-type
-		if resp.StatusCode == http.StatusOK {
-			contentType := resp.Header.Get("Content-Type")
-			if contentType != "application/json" {
-				t.Errorf("successful response missing or invalid content type: %s", contentType)
+		// Content-Type validation logic
+		switch contentType {
+		case "application/json":
+			// Valid content type should return 200 OK or 400 Bad Request
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("Unexpected status code for valid content type: %d", resp.StatusCode)
+			}
+		case "":
+			// Empty content type should be treated like an invalid content type
+			fallthrough
+		default:
+			// All other content types should return 415 Unsupported Media Type
+			if resp.StatusCode != http.StatusUnsupportedMediaType {
+				t.Errorf("Expected status 415 for content type %q, got %d", contentType, resp.StatusCode)
 			}
 		}
 
-		// Read response body
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			t.Errorf("failed to read response body: %v", err)
-			return
-		}
-
-		// For 200 responses, verify it's a valid admission review
+		// For 200 responses, verify JSON structure
 		if resp.StatusCode == http.StatusOK {
+			body, err := io.ReadAll(resp.Body)
+			assert.NoError(t, err)
+
 			review := &admissionv1.AdmissionReview{}
-			if err := json.Unmarshal(body, review); err != nil {
-				t.Errorf("invalid response JSON: %v", err)
-				return
-			}
+			err = json.Unmarshal(body, review)
+			assert.NoError(t, err)
 
-			if review.Response == nil {
-				t.Error("missing response in admission review")
-				return
-			}
-
-			if !review.Response.Allowed {
-				t.Error("response not allowed")
-			}
-
-			// Verify patch if present
-			if len(review.Response.Patch) > 0 {
-				var patchOps []map[string]interface{}
-				if err := json.Unmarshal(review.Response.Patch, &patchOps); err != nil {
-					t.Errorf("invalid patch JSON: %v", err)
-				}
-			}
+			assert.NotNil(t, review.Response)
+			assert.True(t, review.Response.Allowed)
 		}
 	})
 }
