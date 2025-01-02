@@ -30,6 +30,106 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// portAllocator manages test port allocation to prevent conflicts
+type portAllocator struct {
+	mu         sync.Mutex
+	usedPorts  map[int]struct{}
+	basePort   int
+	maxRetries int
+}
+
+// newPortAllocator creates a new portAllocator instance
+func newPortAllocator() *portAllocator {
+	return &portAllocator{
+		usedPorts:  make(map[int]struct{}),
+		basePort:   10000, // Start at a high port number
+		maxRetries: 50,    // Maximum number of retries
+	}
+}
+
+// getPort allocates an available port for testing
+func (pa *portAllocator) getPort(t *testing.T) (int, func()) {
+	t.Helper()
+
+	pa.mu.Lock()
+	defer pa.mu.Unlock()
+
+	for retry := 0; retry < pa.maxRetries; retry++ {
+		// Try to find an available port
+		port := pa.findAvailablePort(t)
+		if port == 0 {
+			continue
+		}
+
+		// Verify the port is truly available by attempting to listen
+		if listener, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port)); err == nil {
+			listener.Close()
+			pa.usedPorts[port] = struct{}{}
+
+			// Return the port and a cleanup function
+			cleanup := func() {
+				pa.mu.Lock()
+				delete(pa.usedPorts, port)
+				pa.mu.Unlock()
+			}
+
+			return port, cleanup
+		}
+	}
+
+	t.Fatal("Failed to allocate available port after maximum retries")
+	return 0, nil
+}
+
+// findAvailablePort attempts to find an unused port
+func (pa *portAllocator) findAvailablePort(t *testing.T) int {
+	t.Helper()
+
+	// Try to get a system-assigned port first
+	if listener, err := net.Listen("tcp", "localhost:0"); err == nil {
+		port := listener.Addr().(*net.TCPAddr).Port
+		listener.Close()
+
+		// Verify port isn't in our used ports map
+		if _, used := pa.usedPorts[port]; !used {
+			// Wait a brief moment to ensure the port is truly released
+			time.Sleep(10 * time.Millisecond)
+			return port
+		}
+	}
+
+	// Fall back to searching from base port
+	for port := pa.basePort; port < 65535; port++ {
+		if _, used := pa.usedPorts[port]; !used {
+			return port
+		}
+	}
+
+	return 0
+}
+
+// getAddr returns a formatted address string with the allocated port
+func (pa *portAllocator) getAddr(t *testing.T) (string, func()) {
+	t.Helper()
+	port, cleanup := pa.getPort(t)
+	return fmt.Sprintf("localhost:%d", port), cleanup
+}
+
+// Global port allocator instance for tests
+var testPortAllocator = newPortAllocator()
+
+// GetTestAddr returns an available address for testing
+func GetTestAddr(t *testing.T) (string, func()) {
+	return testPortAllocator.getAddr(t)
+}
+
+// AssertPortAvailable verifies that a port is actually available
+func AssertPortAvailable(t *testing.T, port int) {
+	listener, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+	require.NoError(t, err, "Port %d should be available", port)
+	listener.Close()
+}
+
 // testCertConfig holds basic configuration for test certificates
 type testCertConfig struct {
 	validFor time.Duration
@@ -131,9 +231,12 @@ func setupWebhookTestServer(t *testing.T, useMockTLS bool) (*Server, func()) {
 		certFile, keyFile, cleanup = generateTestCert(t, defaultTestCertConfig())
 	}
 
+	addr, portCleanup := GetTestAddr(t)
+	defer portCleanup()
+
 	// Create test configuration
 	cfg := &config.Config{
-		Address:  "localhost:0", // Let OS assign port
+		Address:  addr,
 		CertFile: certFile,
 		KeyFile:  keyFile,
 		LogLevel: "debug",
@@ -146,55 +249,6 @@ func setupWebhookTestServer(t *testing.T, useMockTLS bool) (*Server, func()) {
 	// Create server
 	srv, err := NewTestServer(cfg, reg)
 	require.NoError(t, err, "failed to create test server")
-
-	return srv, cleanup
-}
-
-// mockTLSServer wraps a test server with mocked TLS for tests that don't need real certificates
-func mockTLSServer(t *testing.T, handler http.Handler) *httptest.Server {
-	t.Helper()
-	return httptest.NewTLSServer(handler)
-}
-
-// setupTest creates a test server with temporary certificates and a custom registry
-func setupTest(t *testing.T) (*Server, func()) {
-	t.Helper()
-
-	// Create a temporary directory for test certificates
-	tempDir, err := os.MkdirTemp("", "webhook-test-")
-	require.NoError(t, err)
-
-	// Generate self-signed certificate
-	testCfg := defaultTestCertConfig()
-	certFile, keyFile, cleanupCerts := generateTestCert(t, testCfg)
-	defer cleanupCerts()
-
-	// Create a test configuration with temp certificate paths
-	cfg := &config.Config{
-		Address:  "localhost:0", // Use port 0 to let the OS assign a free port
-		CertFile: certFile,
-		KeyFile:  keyFile,
-		LogLevel: "debug",
-		Console:  true,
-	}
-
-	// Capture logs in a buffer for testing
-	var logBuffer strings.Builder
-	logger := zerolog.New(&logBuffer).With().Timestamp().Logger()
-
-	// Create a new Prometheus registry for this test
-	reg := prometheus.NewRegistry()
-
-	// Create a new test server with custom logger
-	srv, err := NewTestServer(cfg, reg)
-	require.NoError(t, err)
-	srv.logger = logger
-
-	// Create a cleanup function
-	cleanup := func() {
-		// Remove temporary certificate files and directory
-		os.RemoveAll(tempDir)
-	}
 
 	return srv, cleanup
 }
