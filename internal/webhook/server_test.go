@@ -487,42 +487,6 @@ func TestServerShutdownSignals(t *testing.T) {
 	}
 }
 
-func waitForServer(t *testing.T, srv *Server) string {
-	t.Helper()
-
-	ready := make(chan string)
-	timeout := time.After(10 * time.Second)
-
-	go func() {
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				addr, err := srv.GetAddr()
-				if err == nil && addr != "" && addr != "localhost:0" && srv.health.isReady() {
-					ready <- addr
-					return
-				}
-			case <-timeout:
-				return
-			}
-		}
-	}()
-
-	select {
-	case addr := <-ready:
-		t.Logf("Server ready at address: %s", addr)
-		return addr
-	case <-timeout:
-		addr, err := srv.GetAddr()
-		t.Fatalf("Timeout waiting for server to be ready. Address: %v (err: %v), Ready state: %v",
-			addr, err, srv.health.isReady())
-		return ""
-	}
-}
-
 func TestServerShutdownTimeout(t *testing.T) {
 	// Create a temporary directory for test certificates
 	tempDir, err := os.MkdirTemp("", "webhook-timeout-test-")
