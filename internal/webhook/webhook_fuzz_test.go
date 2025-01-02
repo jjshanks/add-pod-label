@@ -1,4 +1,3 @@
-// internal/webhook/webhook_fuzz_test.go
 package webhook
 
 import (
@@ -7,65 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"unicode/utf8"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
-
-// isValidLabelValue checks if a string is a valid Kubernetes label value
-func isValidLabelValue(s string) bool {
-	if len(s) > 63 || len(s) == 0 {
-		return false
-	}
-	if !utf8.ValidString(s) {
-		return false
-	}
-	for _, r := range s {
-		if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.') {
-			return false
-		}
-	}
-	return true
-}
-
-// isValidLabelKey checks if a string is a valid Kubernetes label key
-func isValidLabelKey(s string) bool {
-	if len(s) > 253 || len(s) == 0 {
-		return false
-	}
-	if !utf8.ValidString(s) {
-		return false
-	}
-	parts := split(s, '/')
-	if len(parts) > 2 {
-		return false
-	}
-	for _, part := range parts {
-		if !isValidLabelValue(part) {
-			return false
-		}
-	}
-	return true
-}
-
-// split splits a string by a separator, handling empty strings correctly
-func split(s string, sep rune) []string {
-	var result []string
-	current := ""
-	for _, r := range s {
-		if r == sep {
-			result = append(result, current)
-			current = ""
-		} else {
-			current += string(r)
-		}
-	}
-	result = append(result, current)
-	return result
-}
 
 func FuzzCreatePatch(f *testing.F) {
 	// Add seed corpus with string inputs that we'll use to build the pod
@@ -75,9 +22,18 @@ func FuzzCreatePatch(f *testing.F) {
 
 	// Run the fuzz test
 	f.Fuzz(func(t *testing.T, name string, namespace string, annotationValue string, labelKey string, labelValue string) {
-		// Skip invalid inputs early
-		if (labelKey != "" && !isValidLabelKey(labelKey)) || (labelValue != "" && !isValidLabelValue(labelValue)) {
-			t.Skip("Invalid label key or value")
+		// Skip invalid inputs early using k8s validation
+		if labelKey != "" {
+			errs := validation.IsQualifiedName(labelKey)
+			if len(errs) > 0 {
+				t.Skip("Invalid label key")
+			}
+		}
+		if labelValue != "" {
+			errs := validation.IsValidLabelValue(labelValue)
+			if len(errs) > 0 {
+				t.Skip("Invalid label value")
+			}
 		}
 
 		// Create a test server
