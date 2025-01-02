@@ -3,7 +3,6 @@ package webhook
 import (
 	"fmt"
 	"net/http"
-	"regexp"
 	"runtime/debug"
 	"time"
 	"unicode"
@@ -12,11 +11,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
-)
-
-var (
-	// labelSanitizer is a compiled regex used to sanitize metric label values
-	labelSanitizer = regexp.MustCompile("[^a-zA-Z0-9_-]+")
 )
 
 const (
