@@ -1,8 +1,6 @@
 package webhook
 
 import (
-	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -75,15 +73,12 @@ func setupTestServer(t *testing.T, clock Clock) *TestServer {
 	certFile, keyFile, cleanupCerts := generateTestCert(t, testCfg)
 	defer cleanupCerts()
 
-	// Get random available port
-	listener, err := net.Listen("tcp", "localhost:0")
-	require.NoError(t, err)
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
+	addr, portCleanup := GetTestAddr(t)
+	defer portCleanup()
 
 	// Create test configuration with temp certificate paths and random port
 	cfg := &config.Config{
-		Address:  fmt.Sprintf("localhost:%d", port),
+		Address:  addr,
 		CertFile: certFile,
 		KeyFile:  keyFile,
 		LogLevel: "debug",
