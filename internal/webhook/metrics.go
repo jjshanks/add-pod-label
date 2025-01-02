@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"regexp"
 	"runtime/debug"
-	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -265,10 +264,10 @@ func (m *metrics) recordLabelOperation(operation string, namespace string) {
 // It enforces Prometheus label naming requirements by:
 // - Validating and handling invalid UTF-8 strings
 // - Replacing invalid characters with single underscores
+// - Collapsing multiple underscores into a single underscore
 // - Ensuring the label starts with a letter or underscore
 // - Truncating to 63 characters maximum length
 func sanitizeLabel(s string) string {
-	// Handle invalid UTF-8 and empty strings
 	if !utf8.ValidString(s) {
 		return "_invalid_utf8_"
 	}
@@ -276,43 +275,35 @@ func sanitizeLabel(s string) string {
 		return "_empty_"
 	}
 
-	// Check for invalid Unicode characters
+	// Single pass for validation and transformation
+	var result []rune
+	lastWasUnderscore := false
+
 	for _, r := range s {
 		if !unicode.IsPrint(r) || r > unicode.MaxASCII {
 			return "_invalid_unicode"
 		}
-	}
 
-	// Single pass to replace invalid chars and handle length
-	sanitized := strings.Map(func(r rune) rune {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' {
-			return r
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' {
+			result = append(result, r)
+			lastWasUnderscore = false
+		} else if !lastWasUnderscore {
+			result = append(result, '_')
+			lastWasUnderscore = true
 		}
-		return '_'
-	}, s)
-
-	// Collapse multiple underscores to single underscore
-	for strings.Contains(sanitized, "__") {
-		sanitized = strings.ReplaceAll(sanitized, "__", "_")
 	}
 
-	// Ensure valid start character
-	if !unicode.IsLetter([]rune(sanitized)[0]) {
-		sanitized = "_" + sanitized
+	// Ensure valid start and handle empty result
+	if len(result) == 0 || !unicode.IsLetter(result[0]) {
+		result = append([]rune{'_'}, result...)
 	}
 
-	// Special case: if the string is mostly 'x's, convert to all 'x's for the truncated output
-	if len(sanitized) > 63 && strings.Count(sanitized, "x") > len(sanitized)/2 {
-		return strings.Repeat("x", 63)
+	// Truncate if needed
+	if len(result) > 63 {
+		result = result[:63]
 	}
 
-	// Truncate if needed, respecting UTF-8 boundaries
-	if utf8.RuneCountInString(sanitized) > 63 {
-		runes := []rune(sanitized)
-		sanitized = string(runes[:63])
-	}
-
-	return sanitized
+	return string(result)
 }
 
 // recordAnnotationValidation records the result of annotation validation for a given namespace

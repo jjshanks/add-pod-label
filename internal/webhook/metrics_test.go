@@ -769,8 +769,8 @@ func TestSanitizeLabel(t *testing.T) {
 		{"special!@#$%^&*()chars", "special_chars"},
 		{"", "_empty_"},
 		{"Γ£û∩╕Åinvalid_unicode", "_invalid_unicode"},
-		{"a" + strings.Repeat("x", 100), strings.Repeat("x", 63)},
-		{"a" + strings.Repeat("x", 200), strings.Repeat("x", 63)},
+		{"a" + strings.Repeat("x", 100), "a" + strings.Repeat("x", 62)},
+		{"a" + strings.Repeat("x", 200), "a" + strings.Repeat("x", 62)},
 	}
 
 	for _, tt := range tests {
