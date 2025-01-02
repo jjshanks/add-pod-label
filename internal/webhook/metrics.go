@@ -279,6 +279,13 @@ func sanitizeLabel(s string) string {
 	var result []rune
 	lastWasUnderscore := false
 
+	// We reject any string containing non-ASCII or non-printable characters to
+	// prevent potential security issues such as:
+	// - Unicode normalization attacks
+	// - Hidden or zero-width characters
+	// - Control characters that could affect metric parsing
+	// - Characters that could be visually confusing
+	// See https://prometheus.io/docs/practices/naming/ for more details
 	for _, r := range s {
 		if !unicode.IsPrint(r) || r > unicode.MaxASCII {
 			return "_invalid_unicode"
