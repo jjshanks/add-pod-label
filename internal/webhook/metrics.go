@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"regexp"
 	"runtime/debug"
-	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -13,6 +12,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
+)
+
+var (
+	// labelSanitizer is a compiled regex used to sanitize metric label values
+	labelSanitizer = regexp.MustCompile("[^a-zA-Z0-9_-]+")
 )
 
 const (
@@ -256,43 +260,57 @@ func (m *metrics) recordLabelOperation(operation string, namespace string) {
 	m.labelOperationsTotal.WithLabelValues(operation, sanitizeLabel(namespace)).Inc()
 }
 
-// sanitizeLabel ensures a string is safe to use as a Prometheus metric label
+// sanitizeLabel ensures a string is safe to use as a Prometheus metric label.
+// It enforces Prometheus label naming requirements by:
+// - Validating and handling invalid UTF-8 strings
+// - Replacing invalid characters with single underscores
+// - Collapsing multiple underscores into a single underscore
+// - Ensuring the label starts with a letter or underscore
+// - Truncating to 63 characters maximum length
 func sanitizeLabel(s string) string {
-	// If the input is empty or not a valid UTF-8 string, return a default value
 	if !utf8.ValidString(s) {
 		return "_invalid_utf8_"
 	}
-
 	if s == "" {
 		return "_empty_"
 	}
 
-	// Replace non-alphanumeric and non-underscore characters
-	reg := regexp.MustCompile("[^a-zA-Z0-9_-]+")
-	sanitized := reg.ReplaceAllString(s, "_")
+	// Single pass for validation and transformation
+	var result []rune
+	lastWasUnderscore := false
 
-	// Ensure starts with a letter or underscore
-	if len(sanitized) > 0 && !unicode.IsLetter(rune(sanitized[0])) && sanitized[0] != '_' {
-		sanitized = "_" + sanitized
-	}
-
-	// Handle numeric-only strings
-	if match, _ := regexp.MatchString("^[0-9]+$", sanitized); match {
-		sanitized = "_" + sanitized
-	}
-
-	// Truncate to 63 characters, prioritizing x characters
-	if len(sanitized) > 63 {
-		if strings.Count(sanitized, "x") > 0 {
-			// Keep x-only string if possible
-			xOnly := strings.Repeat("x", 63)
-			return xOnly
+	// We reject any string containing non-ASCII or non-printable characters to
+	// prevent potential security issues such as:
+	// - Unicode normalization attacks
+	// - Hidden or zero-width characters
+	// - Control characters that could affect metric parsing
+	// - Characters that could be visually confusing
+	// See https://prometheus.io/docs/practices/naming/ for more details
+	for _, r := range s {
+		if !unicode.IsPrint(r) || r > unicode.MaxASCII {
+			return "_invalid_unicode"
 		}
-		// Otherwise, truncate from the end
-		sanitized = sanitized[:63]
+
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' {
+			result = append(result, r)
+			lastWasUnderscore = false
+		} else if !lastWasUnderscore {
+			result = append(result, '_')
+			lastWasUnderscore = true
+		}
 	}
 
-	return sanitized
+	// Ensure valid start and handle empty result
+	if len(result) == 0 || !unicode.IsLetter(result[0]) {
+		result = append([]rune{'_'}, result...)
+	}
+
+	// Truncate if needed
+	if len(result) > 63 {
+		result = result[:63]
+	}
+
+	return string(result)
 }
 
 // recordAnnotationValidation records the result of annotation validation for a given namespace
