@@ -525,159 +525,86 @@ func TestIntegrationWithServer(t *testing.T) {
 	}
 }
 
-func TestLabelOperationMetrics(t *testing.T) {
-	tests := []struct {
-		name           string
-		operation      string
-		namespace      string
-		recorded       bool // Indicates whether the metric should be recorded
-		expectedLabels map[string]string
-	}{
-		{
-			name:      "successful label operation",
-			operation: labelOperationSuccess,
-			namespace: "default",
-			recorded:  true,
-			expectedLabels: map[string]string{
-				"operation": "success",
-				"namespace": "default",
-			},
-		},
-		{
-			name:      "skipped label operation",
-			operation: labelOperationSkipped,
-			namespace: "test-ns",
-			recorded:  true,
-			expectedLabels: map[string]string{
-				"operation": "skipped",
-				"namespace": "test-ns",
-			},
-		},
-		{
-			name:      "error label operation",
-			operation: labelOperationError,
-			namespace: "error-ns",
-			recorded:  true,
-			expectedLabels: map[string]string{
-				"operation": "error",
-				"namespace": "error-ns",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create a new registry for each test to ensure clean state
-			reg := prometheus.NewRegistry()
-			m, err := initMetrics(reg)
-			require.NoError(t, err)
-
-			// Explicitly record the metric if recorded is true
-			if tt.recorded {
-				m.recordLabelOperation(tt.operation, tt.namespace)
-			}
-
-			// Gather metrics and print for debugging
-			metrics, err := reg.Gather()
-			require.NoError(t, err)
-
-			// Debug: print all gathered metrics
-			t.Logf("Total metric families gathered: %d", len(metrics))
-			for _, mf := range metrics {
-				t.Logf("Metric family name: %s", mf.GetName())
-				for _, m := range mf.GetMetric() {
-					labels := m.GetLabel()
-					labelStr := ""
-					for _, label := range labels {
-						labelStr += fmt.Sprintf("%s=%s ", label.GetName(), label.GetValue())
-					}
-					t.Logf("  Metric labels: %s", labelStr)
-				}
-			}
-
-			var found bool
-			for _, mf := range metrics {
-				if mf.GetName() == "pod_label_webhook_label_operations_total" {
-					for _, m := range mf.GetMetric() {
-						labels := m.GetLabel()
-
-						// Check if the labels match exactly
-						if len(labels) == 2 {
-							labelMap := make(map[string]string)
-							for _, label := range labels {
-								labelMap[label.GetName()] = label.GetValue()
-							}
-
-							// Compare labels exactly
-							if labelMap["operation"] == tt.operation &&
-								labelMap["namespace"] == tt.namespace {
-
-								found = true
-
-								// Check the value
-								expectedValue := float64(1)
-								if !tt.recorded {
-									expectedValue = float64(0)
-								}
-								metricValue := extractMetricValue(m)
-								assert.Equal(t, expectedValue, metricValue,
-									"Unexpected metric value for %s operation in %s namespace. Got %v, want %v",
-									tt.operation, tt.namespace, metricValue, expectedValue)
-								break
-							}
-						}
-					}
-				}
-			}
-
-			// If recording was expected, assert that the metric was found
-			if tt.recorded {
-				assert.True(t, found,
-					"Expected metric for %s operation in %s namespace was not found. "+
-						"Searched for labels: %v",
-					tt.operation, tt.namespace, tt.expectedLabels)
-			}
-		})
-	}
+// Generic test framework for metrics
+type metricTestCase struct {
+	name           string
+	metricName     string                         // Full metric name
+	operation      string                         // Operation or result
+	namespace      string                         // Namespace for the metric
+	recorded       bool                           // Whether metric should be recorded
+	metricFunction func(*metrics, string, string) // Function to record metric
+	labelKey       string                         // Label key for the metric (operation/result)
 }
 
-func TestAnnotationValidationMetrics(t *testing.T) {
-	tests := []struct {
-		name           string
-		result         string
-		namespace      string
-		recorded       bool // Indicates whether the metric should be recorded
-		expectedLabels map[string]string
-	}{
+func TestMetricRecording(t *testing.T) {
+	tests := []metricTestCase{
+		// Label operation test cases
 		{
-			name:      "valid annotation",
-			result:    annotationValid,
-			namespace: "default",
-			recorded:  true,
-			expectedLabels: map[string]string{
-				"result":    "valid",
-				"namespace": "default",
+			name:       "successful label operation",
+			metricName: "pod_label_webhook_label_operations_total",
+			operation:  labelOperationSuccess,
+			namespace:  "default",
+			recorded:   true,
+			metricFunction: func(m *metrics, op, ns string) {
+				m.recordLabelOperation(op, ns)
 			},
+			labelKey: "operation",
 		},
 		{
-			name:      "invalid annotation",
-			result:    annotationInvalid,
-			namespace: "test-ns",
-			recorded:  true,
-			expectedLabels: map[string]string{
-				"result":    "invalid",
-				"namespace": "test-ns",
+			name:       "skipped label operation",
+			metricName: "pod_label_webhook_label_operations_total",
+			operation:  labelOperationSkipped,
+			namespace:  "test-ns",
+			recorded:   true,
+			metricFunction: func(m *metrics, op, ns string) {
+				m.recordLabelOperation(op, ns)
 			},
+			labelKey: "operation",
 		},
 		{
-			name:      "missing annotation",
-			result:    annotationMissing,
-			namespace: "missing-ns",
-			recorded:  true,
-			expectedLabels: map[string]string{
-				"result":    "missing",
-				"namespace": "missing-ns",
+			name:       "error label operation",
+			metricName: "pod_label_webhook_label_operations_total",
+			operation:  labelOperationError,
+			namespace:  "error-ns",
+			recorded:   true,
+			metricFunction: func(m *metrics, op, ns string) {
+				m.recordLabelOperation(op, ns)
 			},
+			labelKey: "operation",
+		},
+		// Annotation validation test cases
+		{
+			name:       "valid annotation",
+			metricName: "pod_label_webhook_annotation_validation_total",
+			operation:  annotationValid,
+			namespace:  "default",
+			recorded:   true,
+			metricFunction: func(m *metrics, result, ns string) {
+				m.recordAnnotationValidation(result, ns)
+			},
+			labelKey: "result",
+		},
+		{
+			name:       "invalid annotation",
+			metricName: "pod_label_webhook_annotation_validation_total",
+			operation:  annotationInvalid,
+			namespace:  "test-ns",
+			recorded:   true,
+			metricFunction: func(m *metrics, result, ns string) {
+				m.recordAnnotationValidation(result, ns)
+			},
+			labelKey: "result",
+		},
+		{
+			name:       "missing annotation",
+			metricName: "pod_label_webhook_annotation_validation_total",
+			operation:  annotationMissing,
+			namespace:  "missing-ns",
+			recorded:   true,
+			metricFunction: func(m *metrics, result, ns string) {
+				m.recordAnnotationValidation(result, ns)
+			},
+			labelKey: "result",
 		},
 	}
 
@@ -688,16 +615,16 @@ func TestAnnotationValidationMetrics(t *testing.T) {
 			m, err := initMetrics(reg)
 			require.NoError(t, err)
 
-			// Explicitly record the metric if recorded is true
+			// Record metric if needed
 			if tt.recorded {
-				m.recordAnnotationValidation(tt.result, tt.namespace)
+				tt.metricFunction(m, tt.operation, tt.namespace)
 			}
 
-			// Gather metrics and print for debugging
+			// Gather metrics
 			metrics, err := reg.Gather()
 			require.NoError(t, err)
 
-			// Debug: print all gathered metrics
+			// Debug logging
 			t.Logf("Total metric families gathered: %d", len(metrics))
 			for _, mf := range metrics {
 				t.Logf("Metric family name: %s", mf.GetName())
@@ -711,34 +638,29 @@ func TestAnnotationValidationMetrics(t *testing.T) {
 				}
 			}
 
-			var found bool
+			// Verify metric
+			found := false
 			for _, mf := range metrics {
-				if mf.GetName() == "pod_label_webhook_annotation_validation_total" {
+				if mf.GetName() == tt.metricName {
 					for _, m := range mf.GetMetric() {
 						labels := m.GetLabel()
-
-						// Check if the labels match exactly
 						if len(labels) == 2 {
 							labelMap := make(map[string]string)
 							for _, label := range labels {
 								labelMap[label.GetName()] = label.GetValue()
 							}
 
-							// Compare labels exactly
-							if labelMap["result"] == tt.result &&
+							if labelMap[tt.labelKey] == tt.operation &&
 								labelMap["namespace"] == tt.namespace {
-
 								found = true
-
-								// Check the value
 								expectedValue := float64(1)
 								if !tt.recorded {
 									expectedValue = float64(0)
 								}
 								metricValue := extractMetricValue(m)
 								assert.Equal(t, expectedValue, metricValue,
-									"Unexpected metric value for %s result in %s namespace. Got %v, want %v",
-									tt.result, tt.namespace, metricValue, expectedValue)
+									"Unexpected metric value for %s %s in %s namespace",
+									tt.labelKey, tt.operation, tt.namespace)
 								break
 							}
 						}
@@ -746,12 +668,10 @@ func TestAnnotationValidationMetrics(t *testing.T) {
 				}
 			}
 
-			// If recording was expected, assert that the metric was found
 			if tt.recorded {
 				assert.True(t, found,
-					"Expected metric for %s result in %s namespace was not found. "+
-						"Searched for labels: %v",
-					tt.result, tt.namespace, tt.expectedLabels)
+					"Expected metric for %s %s in %s namespace was not found",
+					tt.labelKey, tt.operation, tt.namespace)
 			}
 		})
 	}
