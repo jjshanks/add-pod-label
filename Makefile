@@ -1,4 +1,4 @@
-.PHONY: all build test clean build deploy undeploy lint lint-yaml lint-all verify
+.PHONY: all build test clean build deploy undeploy lint lint-yaml lint-all verify fuzz
 
 # Default target
 all: build
@@ -18,6 +18,16 @@ test-integration:
 	$(MAKE) build && \
 	./test/integration/kind-deploy.sh && \
 	./test/integration/integ-test.sh
+
+# Run fuzz tests (default 1m duration)
+fuzz:
+	go test -fuzz=FuzzCreatePatch -fuzztime=1m ./internal/webhook/
+	go test -fuzz=FuzzHandleMutate -fuzztime=1m ./internal/webhook/
+
+# Run fuzz tests for a longer duration (5m)
+fuzz-long:
+	go test -fuzz=FuzzCreatePatch -fuzztime=5m ./internal/webhook/
+	go test -fuzz=FuzzHandleMutate -fuzztime=5m ./internal/webhook/
 
 # Clean build artifacts
 clean:

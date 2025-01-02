@@ -21,7 +21,7 @@ This enables:
 - Easy simulation of various timing scenarios
 - Fast and reliable test execution
 
-### Integration Tests
+## Integration Tests
 
 Integration tests verify the webhook's behavior in a real Kubernetes environment using Kind. The tests:
 
@@ -41,7 +41,7 @@ make test
 make test-integration
 ```
 
-### Health Check Testing
+## Health Check Testing
 
 The health endpoints can be tested manually using curl:
 
@@ -57,6 +57,38 @@ Health probes are configured in the deployment manifest and use HTTPS. The probe
 
 - Liveness: Server is responsive and hasn't deadlocked
 - Readiness: Server is initialized and ready to handle requests
+
+## Fuzz Testing
+
+The project includes fuzz testing to identify edge cases and potential vulnerabilities:
+
+### Available Fuzz Tests
+- `FuzzCreatePatch`: Tests pod label mutation with fuzzed inputs
+- `FuzzHandleMutate`: Tests webhook request handling with fuzzed admission reviews
+
+Fuzz tests can be run using:
+```bash
+# Run all fuzz tests for 1 minute
+make fuzz
+
+# Run extended fuzz tests for 5 minutes
+make fuzz-long
+
+# Run specific fuzz test with custom duration
+go test -fuzz=FuzzCreatePatch -fuzztime=10m ./internal/webhook/
+```
+
+Fuzz testing helps identify:
+- Input validation issues
+- Encoding/parsing bugs
+- Edge cases in label handling
+- Memory safety issues
+- Security vulnerabilities
+
+Failed fuzz test inputs are saved to `testdata/fuzz/` and can be replayed:
+```bash
+go test -run=FuzzCreatePatch/SEED_HERE
+```
 
 ## Adding New Tests
 
