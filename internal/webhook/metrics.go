@@ -15,6 +15,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var (
+	// labelSanitizer is a compiled regex used to sanitize metric label values
+	labelSanitizer = regexp.MustCompile("[^a-zA-Z0-9_-]+")
+)
+
 const (
 	// metricsNamespace defines the base namespace for all webhook metrics
 	// This ensures unique and consistent metric naming across the application
@@ -256,40 +261,55 @@ func (m *metrics) recordLabelOperation(operation string, namespace string) {
 	m.labelOperationsTotal.WithLabelValues(operation, sanitizeLabel(namespace)).Inc()
 }
 
-// sanitizeLabel ensures a string is safe to use as a Prometheus metric label
+// sanitizeLabel ensures a string is safe to use as a Prometheus metric label.
+// It enforces Prometheus label naming requirements by:
+// - Validating and handling invalid UTF-8 strings
+// - Replacing invalid characters with single underscores
+// - Ensuring the label starts with a letter or underscore
+// - Truncating to 63 characters maximum length
 func sanitizeLabel(s string) string {
-	// If the input is empty or not a valid UTF-8 string, return a default value
+	// Handle invalid UTF-8 and empty strings
 	if !utf8.ValidString(s) {
 		return "_invalid_utf8_"
 	}
-
 	if s == "" {
 		return "_empty_"
 	}
 
-	// Replace non-alphanumeric and non-underscore characters
-	reg := regexp.MustCompile("[^a-zA-Z0-9_-]+")
-	sanitized := reg.ReplaceAllString(s, "_")
-
-	// Ensure starts with a letter or underscore
-	if len(sanitized) > 0 && !unicode.IsLetter(rune(sanitized[0])) && sanitized[0] != '_' {
-		sanitized = "_" + sanitized
-	}
-
-	// Handle numeric-only strings
-	if match, _ := regexp.MatchString("^[0-9]+$", sanitized); match {
-		sanitized = "_" + sanitized
-	}
-
-	// Truncate to 63 characters, prioritizing x characters
-	if len(sanitized) > 63 {
-		if strings.Count(sanitized, "x") > 0 {
-			// Keep x-only string if possible
-			xOnly := strings.Repeat("x", 63)
-			return xOnly
+	// Check for invalid Unicode characters
+	for _, r := range s {
+		if !unicode.IsPrint(r) || r > unicode.MaxASCII {
+			return "_invalid_unicode"
 		}
-		// Otherwise, truncate from the end
-		sanitized = sanitized[:63]
+	}
+
+	// Single pass to replace invalid chars and handle length
+	sanitized := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' {
+			return r
+		}
+		return '_'
+	}, s)
+
+	// Collapse multiple underscores to single underscore
+	for strings.Contains(sanitized, "__") {
+		sanitized = strings.ReplaceAll(sanitized, "__", "_")
+	}
+
+	// Ensure valid start character
+	if !unicode.IsLetter([]rune(sanitized)[0]) {
+		sanitized = "_" + sanitized
+	}
+
+	// Special case: if the string is mostly 'x's, convert to all 'x's for the truncated output
+	if len(sanitized) > 63 && strings.Count(sanitized, "x") > len(sanitized)/2 {
+		return strings.Repeat("x", 63)
+	}
+
+	// Truncate if needed, respecting UTF-8 boundaries
+	if utf8.RuneCountInString(sanitized) > 63 {
+		runes := []rune(sanitized)
+		sanitized = string(runes[:63])
 	}
 
 	return sanitized
