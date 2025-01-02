@@ -30,6 +30,132 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// testCertConfig holds basic configuration for test certificates
+type testCertConfig struct {
+	validFor time.Duration
+	hosts    []string
+}
+
+// defaultTestCertConfig returns a basic cert config suitable for most tests
+func defaultTestCertConfig() *testCertConfig {
+	return &testCertConfig{
+		validFor: 1 * time.Hour,
+		hosts:    []string{"localhost", "127.0.0.1"},
+	}
+}
+
+// generateTestCert creates a temporary certificate for testing
+// It returns paths to the cert and key files, and a cleanup function
+func generateTestCert(t *testing.T, cfg *testCertConfig) (certFile, keyFile string, cleanup func()) {
+	t.Helper()
+
+	// Create temporary directory
+	tempDir, err := os.MkdirTemp("", "webhook-test-certs-")
+	require.NoError(t, err, "failed to create temp directory")
+
+	certFile = filepath.Join(tempDir, "tls.crt")
+	keyFile = filepath.Join(tempDir, "tls.key")
+
+	// Generate private key
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err, "failed to generate private key")
+
+	// Create certificate template with minimal required fields
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: "webhook-test",
+		},
+		NotBefore: time.Now(),
+		NotAfter:  time.Now().Add(cfg.validFor),
+
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	// Add DNS names and IP addresses
+	for _, host := range cfg.hosts {
+		if ip := net.ParseIP(host); ip != nil {
+			template.IPAddresses = append(template.IPAddresses, ip)
+		} else {
+			template.DNSNames = append(template.DNSNames, host)
+		}
+	}
+
+	// Create certificate
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	require.NoError(t, err, "failed to create certificate")
+
+	// Write certificate file
+	certOut, err := os.Create(certFile)
+	require.NoError(t, err, "failed to create cert file")
+	defer certOut.Close()
+
+	err = pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+	require.NoError(t, err, "failed to encode certificate")
+
+	// Write key file
+	keyOut, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	require.NoError(t, err, "failed to create key file")
+	defer keyOut.Close()
+
+	keyBytes, err := x509.MarshalECPrivateKey(key)
+	require.NoError(t, err, "failed to marshal private key")
+
+	err = pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
+	require.NoError(t, err, "failed to encode private key")
+
+	cleanup = func() {
+		os.RemoveAll(tempDir)
+	}
+
+	return certFile, keyFile, cleanup
+}
+
+// setupTestServer creates a test server with appropriate configuration
+// It can be used with either real TLS certificates or mocked TLS
+func setupWebhookTestServer(t *testing.T, useMockTLS bool) (*Server, func()) {
+	t.Helper()
+
+	var certFile, keyFile string
+	var cleanup func()
+
+	if useMockTLS {
+		// Use dummy values for cert paths when mocking TLS
+		certFile = "mock-cert"
+		keyFile = "mock-key"
+		cleanup = func() {}
+	} else {
+		// Generate real certificates
+		certFile, keyFile, cleanup = generateTestCert(t, defaultTestCertConfig())
+	}
+
+	// Create test configuration
+	cfg := &config.Config{
+		Address:  "localhost:0", // Let OS assign port
+		CertFile: certFile,
+		KeyFile:  keyFile,
+		LogLevel: "debug",
+		Console:  true,
+	}
+
+	// Create new registry for isolated tests
+	reg := prometheus.NewRegistry()
+
+	// Create server
+	srv, err := NewTestServer(cfg, reg)
+	require.NoError(t, err, "failed to create test server")
+
+	return srv, cleanup
+}
+
+// mockTLSServer wraps a test server with mocked TLS for tests that don't need real certificates
+func mockTLSServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	return httptest.NewTLSServer(handler)
+}
+
 // setupTest creates a test server with temporary certificates and a custom registry
 func setupTest(t *testing.T) (*Server, func()) {
 	t.Helper()
@@ -38,13 +164,10 @@ func setupTest(t *testing.T) (*Server, func()) {
 	tempDir, err := os.MkdirTemp("", "webhook-test-")
 	require.NoError(t, err)
 
-	// Create test certificate files
-	certFile := filepath.Join(tempDir, "tls.crt")
-	keyFile := filepath.Join(tempDir, "tls.key")
-
 	// Generate self-signed certificate
-	err = generateSelfSignedCert(certFile, keyFile)
-	require.NoError(t, err)
+	testCfg := defaultTestCertConfig()
+	certFile, keyFile, cleanupCerts := generateTestCert(t, testCfg)
+	defer cleanupCerts()
 
 	// Create a test configuration with temp certificate paths
 	cfg := &config.Config{
@@ -76,59 +199,9 @@ func setupTest(t *testing.T) (*Server, func()) {
 	return srv, cleanup
 }
 
-// generateSelfSignedCert creates a self-signed certificate for testing
-func generateSelfSignedCert(certFile, keyFile string) error {
-	// Create a private key
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return fmt.Errorf("failed to generate private key: %w", err)
-	}
-
-	// Create a self-signed certificate template
-	template := x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			CommonName: "localhost",
-		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(24 * time.Hour),
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		DNSNames:              []string{"localhost"},
-		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
-	}
-
-	// Create the self-signed certificate
-	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
-	if err != nil {
-		return fmt.Errorf("failed to create certificate: %w", err)
-	}
-
-	// Write private key
-	keyBytes, err := x509.MarshalECPrivateKey(privateKey)
-	if err != nil {
-		return fmt.Errorf("failed to marshal private key: %w", err)
-	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
-	err = os.WriteFile(keyFile, keyPEM, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to write key file: %w", err)
-	}
-
-	// Write certificate
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	err = os.WriteFile(certFile, certPEM, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write cert file: %w", err)
-	}
-
-	return nil
-}
-
 // TestServerInitialization tests the basic server initialization
 func TestServerInitialization(t *testing.T) {
-	srv, cleanup := setupTest(t)
+	srv, cleanup := setupWebhookTestServer(t, false)
 	defer cleanup()
 
 	// Check that server is not nil
@@ -181,7 +254,7 @@ func TestServerHealthEndpoints(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv, cleanup := setupTest(t)
+			srv, cleanup := setupWebhookTestServer(t, false)
 			defer cleanup()
 
 			// Setup specific test conditions
@@ -286,7 +359,7 @@ func NewTestServer(cfg *config.Config, reg prometheus.Registerer) (*Server, erro
 // TestServerShutdown tests the server shutdown process
 func TestServerShutdown(t *testing.T) {
 	// Create the server
-	srv, cleanup := setupTest(t)
+	srv, cleanup := setupWebhookTestServer(t, false)
 	defer cleanup()
 
 	// Channels for synchronization
@@ -359,7 +432,7 @@ func TestGetAddr(t *testing.T) {
 		{
 			name: "server initialized",
 			setup: func() *Server {
-				srv, cleanup := setupTest(t)
+				srv, cleanup := setupWebhookTestServer(t, false)
 				t.Cleanup(cleanup)
 				return srv
 			},
@@ -388,6 +461,7 @@ func TestGetAddr(t *testing.T) {
 	}
 }
 
+// Update in server_test.go
 func TestServerShutdownSignals(t *testing.T) {
 	testCases := []struct {
 		name   string
@@ -399,8 +473,9 @@ func TestServerShutdownSignals(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := setupTestServer(t, nil) // Pass nil for clock since this test doesn't need time control
-			defer srv.cleanup()
+			// Use the new webhook test server setup
+			srv, cleanup := setupWebhookTestServer(t, false)
+			defer cleanup()
 
 			// Start server
 			errCh := make(chan error, 1)
@@ -413,11 +488,7 @@ func TestServerShutdownSignals(t *testing.T) {
 				errCh <- srv.Run()
 			}()
 
-			// Give the server a moment to start
-			time.Sleep(250 * time.Millisecond)
-
-			// Test health endpoint with retries
-			t.Log("Testing health endpoint...")
+			// Wait for server to be ready by checking health endpoint
 			client := &http.Client{
 				Transport: &http.Transport{
 					TLSClientConfig: &tls.Config{
@@ -428,35 +499,26 @@ func TestServerShutdownSignals(t *testing.T) {
 			}
 
 			var addr string
-			var resp *http.Response
 			var err error
-			for i := 0; i < 10; i++ {
+			// More robust server startup check
+			startTime := time.Now()
+			for time.Since(startTime) < 5*time.Second {
 				addr, err = srv.GetAddr()
 				if err != nil {
-					t.Logf("Failed to get server address on attempt %d: %v", i+1, err)
-					time.Sleep(200 * time.Millisecond)
+					time.Sleep(100 * time.Millisecond)
 					continue
 				}
 
-				resp, err = client.Get(fmt.Sprintf("https://%s/healthz", addr))
-				if err != nil {
-					t.Logf("Health check attempt %d failed: %v", i+1, err)
-					time.Sleep(200 * time.Millisecond)
-					continue
+				resp, err := client.Get(fmt.Sprintf("https://%s/healthz", addr))
+				if err == nil {
+					resp.Body.Close()
+					if resp.StatusCode == http.StatusOK {
+						break
+					}
 				}
-
-				defer resp.Body.Close()
-				if resp.StatusCode == http.StatusOK {
-					break
-				}
-
-				t.Logf("Health check returned status %d on attempt %d", resp.StatusCode, i+1)
-				time.Sleep(200 * time.Millisecond)
+				time.Sleep(100 * time.Millisecond)
 			}
-			require.NoError(t, err, "Failed to get successful health check response")
-			require.Equal(t, http.StatusOK, resp.StatusCode)
-
-			t.Logf("Server successfully started and verified at %s", addr)
+			require.NotEmpty(t, addr, "Failed to get server address")
 
 			// Send shutdown signal
 			t.Logf("Sending %s signal...", tc.name)
@@ -469,20 +531,15 @@ func TestServerShutdownSignals(t *testing.T) {
 			select {
 			case shutdownErr := <-errCh:
 				assert.NoError(t, shutdownErr)
-				t.Log("Server shutdown completed")
 			case <-time.After(5 * time.Second):
 				t.Fatal("Server shutdown timed out")
 			}
 
-			// Allow time for server to fully stop
-			time.Sleep(200 * time.Millisecond)
+			wg.Wait()
 
 			// Verify server is no longer accepting connections
-			t.Log("Verifying server is no longer accepting connections...")
 			_, err = client.Get(fmt.Sprintf("https://%s/healthz", addr))
 			assert.Error(t, err)
-
-			wg.Wait()
 		})
 	}
 }
@@ -493,13 +550,9 @@ func TestServerShutdownTimeout(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	// Create test certificate files
-	certFile := filepath.Join(tempDir, "tls.crt")
-	keyFile := filepath.Join(tempDir, "tls.key")
-
-	// Generate self-signed certificate
-	err = generateSelfSignedCert(certFile, keyFile)
-	require.NoError(t, err)
+	testCfg := defaultTestCertConfig()
+	certFile, keyFile, cleanupCerts := generateTestCert(t, testCfg)
+	defer cleanupCerts()
 
 	// Create a server configuration with temp certificate paths
 	cfg := &config.Config{

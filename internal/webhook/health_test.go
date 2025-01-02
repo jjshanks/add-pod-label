@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -72,13 +71,9 @@ func setupTestServer(t *testing.T, clock Clock) *TestServer {
 	tempDir, err := os.MkdirTemp("", "webhook-test-")
 	require.NoError(t, err)
 
-	// Create test certificate files
-	certFile := filepath.Join(tempDir, "tls.crt")
-	keyFile := filepath.Join(tempDir, "tls.key")
-
-	// Generate self-signed certificate
-	err = generateSelfSignedCert(certFile, keyFile)
-	require.NoError(t, err)
+	testCfg := defaultTestCertConfig()
+	certFile, keyFile, cleanupCerts := generateTestCert(t, testCfg)
+	defer cleanupCerts()
 
 	// Get random available port
 	listener, err := net.Listen("tcp", "localhost:0")
