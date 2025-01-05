@@ -1,3 +1,6 @@
+// Package webhook provides functionality for webhook operations.
+// This file implements the main webhook server, handling initialization,
+// TLS configuration, request routing, and graceful shutdown.
 package webhook
 
 import (
@@ -17,32 +20,42 @@ import (
 )
 
 const (
-	// readHeaderTimeout defines the maximum time allowed to read request headers
+	// readHeaderTimeout defines the maximum time allowed to read request headers.
+	// This helps prevent slow-loris attacks.
 	readHeaderTimeout = 10 * time.Second
 
-	// writeTimeout limits the time for writing the full response
+	// writeTimeout limits the time for writing the full response.
+	// This prevents clients from maintaining connections indefinitely.
 	writeTimeout = 10 * time.Second
 
-	// readTimeout sets the maximum time for reading the entire request
+	// readTimeout sets the maximum time for reading the entire request.
+	// This includes the time to read headers and body.
 	readTimeout = 10 * time.Second
 
-	// idleTimeout specifies how long an idle connection is kept open
+	// idleTimeout specifies how long an idle connection is kept open.
+	// This allows connection reuse while preventing resource exhaustion.
 	idleTimeout = 120 * time.Second
 
-	// defaultGracefulTimeout is the default timeout for graceful server shutdown
+	// defaultGracefulTimeout is the default timeout for graceful server shutdown.
+	// The server will wait this long for existing requests to complete before
+	// forcing a shutdown.
 	defaultGracefulTimeout = 30 * time.Second
 )
 
+// Server represents the webhook server instance.
+// It manages the HTTP server, metrics, logging, and health state.
 type Server struct {
-	logger          zerolog.Logger
-	config          *config.Config
-	health          *healthState
-	metrics         *metrics
-	server          *http.Server
-	gracefulTimeout time.Duration
-	serverMu        sync.RWMutex // Protects server field
+	logger          zerolog.Logger // Structured logger for server events
+	config          *config.Config // Server configuration
+	health          *healthState   // Server health tracking
+	metrics         *metrics       // Prometheus metrics collection
+	server          *http.Server   // Underlying HTTP server
+	gracefulTimeout time.Duration  // Maximum time to wait during shutdown
+	serverMu        sync.RWMutex   // Protects server field during updates
 }
 
+// NewServer creates a new webhook server instance with the provided configuration.
+// It initializes logging, metrics collection, and server settings with secure defaults.
 func NewServer(cfg *config.Config) (*Server, error) {
 	// Create base logger with common fields
 	logger := zerolog.New(os.Stdout).With().
@@ -65,7 +78,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		})
 	}
 
-	// Initialize metrics with new registry if none provided
+	// Initialize metrics with new registry
 	reg := prometheus.NewRegistry()
 	m, err := initMetrics(reg)
 	if err != nil {
@@ -82,6 +95,13 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	}, nil
 }
 
+// Run starts the webhook server and blocks until shutdown is triggered.
+// It handles:
+// - Certificate validation
+// - Route setup
+// - TLS configuration
+// - Signal handling
+// - Graceful shutdown
 func (s *Server) Run() error {
 	s.logger.Info().
 		Str("address", s.config.Address).
@@ -94,6 +114,7 @@ func (s *Server) Run() error {
 		return fmt.Errorf("certificate validation failed: %v", err)
 	}
 
+	// Set up HTTP routes
 	mux := http.NewServeMux()
 
 	// Wrap handlers with metrics middleware
@@ -132,6 +153,7 @@ func (s *Server) Run() error {
 	}
 	s.serverMu.Unlock()
 
+	// Mark server as ready to receive requests
 	s.health.markReady()
 	s.metrics.updateHealthMetrics(true, true)
 
@@ -145,7 +167,7 @@ func (s *Server) Run() error {
 		}
 	}()
 
-	// Set up signal handling
+	// Set up signal handling for graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
@@ -161,6 +183,12 @@ func (s *Server) Run() error {
 	}
 }
 
+// shutdown performs a graceful server shutdown.
+// It:
+// - Marks the server as not ready to prevent new requests
+// - Updates health metrics
+// - Waits for in-flight requests to complete
+// - Enforces a timeout for shutdown completion
 func (s *Server) shutdown() error {
 	// Mark server as not ready
 	s.health.ready.Store(false)
@@ -174,7 +202,6 @@ func (s *Server) shutdown() error {
 	ctx, cancel := context.WithTimeout(context.Background(), s.gracefulTimeout)
 	defer cancel()
 
-	// Shutdown server gracefully
 	// Get server reference under lock
 	s.serverMu.RLock()
 	server := s.server
@@ -189,7 +216,8 @@ func (s *Server) shutdown() error {
 	return nil
 }
 
-// GetAddr returns the server's current address in a thread-safe way
+// GetAddr returns the server's current address in a thread-safe way.
+// This is useful for testing and dynamic port assignment.
 func (s *Server) GetAddr() (string, error) {
 	s.serverMu.RLock()
 	defer s.serverMu.RUnlock()
