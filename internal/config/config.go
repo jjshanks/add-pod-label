@@ -1,4 +1,14 @@
-// pkg/config/config.go
+// Package config provides configuration management for the webhook server.
+// It handles loading and validation of configuration from multiple sources:
+// - Environment variables (prefixed with WEBHOOK_)
+// - Configuration files (YAML)
+// - Command line flags
+//
+// Configuration values are loaded with the following precedence (highest to lowest):
+// 1. Command line flags
+// 2. Environment variables
+// 3. Configuration file
+// 4. Default values
 package config
 
 import (
@@ -14,19 +24,22 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Config holds all configuration options for the webhook server.
+// All fields can be set via environment variables, config file, or command line flags.
 type Config struct {
 	// Server configuration
-	Address         string
-	CertFile        string
-	KeyFile         string
-	GracefulTimeout time.Duration
+	Address         string        // The address and port to listen on (e.g., "0.0.0.0:8443")
+	CertFile        string        // Path to the TLS certificate file
+	KeyFile         string        // Path to the TLS private key file
+	GracefulTimeout time.Duration // Maximum time to wait for server shutdown
 
 	// Logging configuration
-	LogLevel string
-	Console  bool
+	LogLevel string // Log level (trace, debug, info, warn, error, fatal, panic)
+	Console  bool   // Whether to use console-formatted logging instead of JSON
 }
 
-// New creates a new Config with default values
+// New creates a new Config with default values.
+// These defaults can be overridden by environment variables, config file, or flags.
 func New() *Config {
 	return &Config{
 		Address:         "0.0.0.0:8443",
@@ -38,7 +51,12 @@ func New() *Config {
 	}
 }
 
-// Validate checks if the configuration is valid
+// Validate checks if the configuration is valid. It verifies:
+// - Log level is a valid zerolog level
+// - Address format is valid (host:port)
+// - Port is a valid TCP port number
+// - Host is a valid IP address (if specified)
+// - Graceful timeout is positive
 func (c *Config) Validate() error {
 	// Validate logging configuration
 	if _, err := zerolog.ParseLevel(c.LogLevel); err != nil {
@@ -56,7 +74,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid port %q: %v", port, err)
 	}
 
-	// Validate host
+	// Validate host if specified
 	if host != "" && host != "0.0.0.0" {
 		if ip := net.ParseIP(host); ip == nil {
 			return fmt.Errorf("invalid IP address: %q", host)
@@ -71,7 +89,10 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// InitializeLogging sets up the logging configuration
+// InitializeLogging sets up the logging configuration based on the Config settings.
+// It configures:
+// - Global log level
+// - Console output format (if enabled)
 func (c *Config) InitializeLogging() {
 	level, _ := zerolog.ParseLevel(c.LogLevel)
 	zerolog.SetGlobalLevel(level)
@@ -84,7 +105,9 @@ func (c *Config) InitializeLogging() {
 	}
 }
 
-// ValidateCertPaths verifies the certificate and key files
+// ValidateCertPaths verifies that the certificate and key files:
+// - Exist and are regular files
+// - Have appropriate permissions (especially for the private key)
 func (c *Config) ValidateCertPaths() error {
 	certInfo, err := os.Stat(c.CertFile)
 	if err != nil {
@@ -102,6 +125,7 @@ func (c *Config) ValidateCertPaths() error {
 		return fmt.Errorf("key path is not a regular file")
 	}
 
+	// Check key file permissions - should not be readable by group or others
 	keyMode := keyInfo.Mode().Perm()
 	if keyMode&0o077 != 0 {
 		return fmt.Errorf("key file %s has excessive permissions %v", c.KeyFile, keyMode)
@@ -112,15 +136,22 @@ func (c *Config) ValidateCertPaths() error {
 	return nil
 }
 
-// LoadConfig loads the configuration from viper
+// LoadConfig loads the configuration from environment variables and the specified config file.
+// It follows these steps:
+// 1. Set up environment variable binding
+// 2. Load config file if specified
+// 3. Validate config file values
+// 4. Override with environment variables
+// 5. Process special cases (like duration parsing)
 func LoadConfig(cfgFile string) (*Config, error) {
 	config := New()
 
+	// Set up viper for environment variables
 	viper.SetEnvPrefix("WEBHOOK")
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	viper.AutomaticEnv()
 
-	// Bind all config keys at once
+	// Bind configuration keys
 	configKeys := []string{
 		"address",
 		"cert-file",
@@ -130,14 +161,15 @@ func LoadConfig(cfgFile string) (*Config, error) {
 		"console",
 	}
 
+	// Bind each configuration key to environment variables
 	for _, key := range configKeys {
 		if err := viper.BindEnv(key); err != nil {
 			log.Error().Err(err).Msgf("Failed to bind environment variable for key: %s", key)
 		}
 	}
 
+	// Load configuration file if specified
 	if cfgFile != "" {
-		// Use config file from the flag
 		viper.SetConfigFile(cfgFile)
 		if err := viper.ReadInConfig(); err != nil {
 			if _, ok := err.(viper.ConfigParseError); ok {
@@ -196,7 +228,7 @@ func LoadConfig(cfgFile string) (*Config, error) {
 		}
 	}
 
-	// Update config from viper (will get either environment variables or config file values)
+	// Update config from viper (environment variables or config file values)
 	if viper.IsSet("address") {
 		config.Address = viper.GetString("address")
 	}
