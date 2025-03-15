@@ -23,11 +23,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjshanks/pod-label-webhook/internal/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/jjshanks/pod-label-webhook/internal/config"
 )
 
 // portAllocator manages test port allocation to prevent conflicts

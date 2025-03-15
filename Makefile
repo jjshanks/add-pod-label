@@ -1,4 +1,4 @@
-.PHONY: all build test clean build deploy undeploy lint lint-yaml lint-all verify fuzz
+.PHONY: all build test clean build deploy undeploy lint lint-yaml lint-all verify fuzz fmt
 
 # Default target
 all: build
@@ -47,3 +47,7 @@ lint-all: lint lint-yaml
 
 # Verify all checks pass (useful for pre-commit)
 verify: lint-all test
+
+# Format Go code using goimports
+fmt:
+	goimports -local github.com/jjshanks/pod-label-webhook -w .
