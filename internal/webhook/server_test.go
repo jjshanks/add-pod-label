@@ -631,15 +631,17 @@ func TestServerShutdownTimeout(t *testing.T) {
 	// Channels for synchronization
 	serverStarted := make(chan struct{})
 	serverStopped := make(chan error, 1)
+	healthCheckDone := make(chan struct{})
 
 	// Start server listener in a goroutine
 	go func() {
 		close(serverStarted)
-		err = srv.server.ListenAndServeTLS(srv.config.CertFile, srv.config.KeyFile)
-		if err != nil && err != http.ErrServerClosed {
-			serverStopped <- err
+		listenErr := srv.server.ListenAndServeTLS(srv.config.CertFile, srv.config.KeyFile)
+		if listenErr != nil && listenErr != http.ErrServerClosed {
+			serverStopped <- listenErr
 		}
 		close(serverStopped)
+		close(healthCheckDone) // Signal that server has fully stopped
 	}()
 
 	// Wait for server to start
@@ -652,18 +654,15 @@ func TestServerShutdownTimeout(t *testing.T) {
 
 	// Measure shutdown time
 	startShutdown := time.Now()
-	err = srv.server.Shutdown(ctx)
+	shutdownErr := srv.server.Shutdown(ctx)
 	shutdownDuration := time.Since(startShutdown)
 
 	// Check shutdown results
-	if err != nil && err != context.DeadlineExceeded {
-		t.Errorf("Unexpected shutdown error: %v", err)
+	if shutdownErr != nil && shutdownErr != context.DeadlineExceeded {
+		t.Errorf("Unexpected shutdown error: %v", shutdownErr)
 	}
 
 	t.Logf("Shutdown completed in %v", shutdownDuration)
-
-	// Verify server is no longer ready
-	assert.False(t, srv.health.isReady())
 
 	// Wait for server to stop or timeout
 	select {
@@ -675,4 +674,10 @@ func TestServerShutdownTimeout(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Server did not shut down in time")
 	}
+
+	// Wait for health check to be safe
+	<-healthCheckDone
+
+	// Now that the server has fully stopped, safely check the health state
+	assert.False(t, srv.health.isReady(), "Server should not be ready after shutdown")
 }
