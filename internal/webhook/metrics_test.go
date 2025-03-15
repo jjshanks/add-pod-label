@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jjshanks/pod-label-webhook/internal/config"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/jjshanks/pod-label-webhook/internal/config"
 )
 
 // Helper function to safely extract float value from a metric

@@ -14,9 +14,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jjshanks/pod-label-webhook/internal/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
+
+	"github.com/jjshanks/pod-label-webhook/internal/config"
 )
 
 const (
