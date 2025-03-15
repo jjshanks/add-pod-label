@@ -202,11 +202,11 @@ func LoadConfig(cfgFile string) (*Config, error) {
 		}
 		if viper.IsSet("console") {
 			rawValue := viper.Get("console")
-			switch rawValue.(type) {
+			switch v := rawValue.(type) {
 			case bool:
 				// This is fine
 			case string:
-				if _, err := strconv.ParseBool(rawValue.(string)); err != nil {
+				if _, err := strconv.ParseBool(v); err != nil {
 					return nil, fmt.Errorf("error unmarshaling config: console must be a boolean")
 				}
 			default:

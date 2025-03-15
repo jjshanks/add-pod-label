@@ -73,7 +73,7 @@ func FuzzCreatePatch(f *testing.F) {
 		patch, err := ts.createPatch(pod)
 
 		if err != nil {
-			if _, ok := err.(*WebhookError); !ok {
+			if _, ok := err.(*Error); !ok {
 				t.Errorf("unexpected error type: %T", err)
 			}
 			return

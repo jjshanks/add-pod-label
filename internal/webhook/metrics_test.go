@@ -286,8 +286,8 @@ func TestMetricsMiddleware(t *testing.T) {
 
 			// Verify error counter for error cases
 			if tt.statusCode >= 400 {
-				errCounter, err := m.errorCounter.GetMetricWith(tt.expectedLabels)
-				require.NoError(t, err)
+				errCounter, errCounterErr := m.errorCounter.GetMetricWith(tt.expectedLabels)
+				require.NoError(t, errCounterErr)
 				assert.Equal(t, float64(1), extractMetricValue(errCounter))
 			}
 

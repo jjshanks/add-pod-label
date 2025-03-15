@@ -115,7 +115,7 @@ func (s *Server) createLabelsMap(pod *corev1.Pod) (map[string]string, error) {
 func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 	// Validate input pod
 	if pod == nil {
-		return nil, &WebhookError{
+		return nil, &Error{
 			Op:  "validate",
 			Err: fmt.Errorf("pod is nil"),
 		}
@@ -215,16 +215,16 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 
 	// Validate content type
 	if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
-		err := fmt.Errorf("invalid Content-Type %q, expected 'application/json'", contentType)
-		logger.Error().Err(err).Str("content_type", contentType).Msg("Invalid content type")
-		http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
+		contentTypeErr := fmt.Errorf("invalid Content-Type %q, expected 'application/json'", contentType)
+		logger.Error().Err(contentTypeErr).Str("content_type", contentType).Msg("Invalid content type")
+		http.Error(w, contentTypeErr.Error(), http.StatusUnsupportedMediaType)
 		return
 	}
 
 	// Decode the admission review
 	admissionReview := &admissionv1.AdmissionReview{}
-	if _, _, err := deserializer.Decode(body, nil, admissionReview); err != nil {
-		err = newDecodeError(err, "admission review")
+	if _, _, decodeErr := deserializer.Decode(body, nil, admissionReview); decodeErr != nil {
+		err = newDecodeError(decodeErr, "admission review")
 		logger.Error().Err(err).Msg("Decode failed")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -233,7 +233,7 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 	// Validate admission review request
 	request := admissionReview.Request
 	if request == nil {
-		err := &WebhookError{
+		err := &Error{
 			Op:  "validate",
 			Err: fmt.Errorf("admission review request is nil"),
 		}
@@ -247,8 +247,8 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 
 	// Unmarshal the pod from the request
 	pod := &corev1.Pod{}
-	if err := json.Unmarshal(request.Object.Raw, pod); err != nil {
-		err = newDecodeError(err, fmt.Sprintf("pod/%s", pod.Name))
+	if unmarshalErr := json.Unmarshal(request.Object.Raw, pod); unmarshalErr != nil {
+		err = newDecodeError(unmarshalErr, fmt.Sprintf("pod/%s", pod.Name))
 		logger.Error().Err(err).Msg("Pod unmarshal failed")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

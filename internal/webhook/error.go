@@ -6,11 +6,11 @@ import (
 	"fmt"
 )
 
-// WebhookError represents an error that occurred during webhook processing.
+// Error represents an error that occurred during webhook processing.
 // It provides context about the operation that failed and the resource being processed.
 // The error implements the error interface and supports error wrapping for
 // maintaining error chains.
-type WebhookError struct {
+type Error struct {
 	Op   string // The operation that failed (e.g., "decode", "validate", "patch")
 	Path string // Resource path or identifier (e.g., "pod/my-pod")
 	Err  error  // The underlying error that caused the failure
@@ -19,7 +19,7 @@ type WebhookError struct {
 // Error implements the error interface.
 // It formats the error message to include the operation, resource path (if any),
 // and underlying error details.
-func (e *WebhookError) Error() string {
+func (e *Error) Error() string {
 	if e.Path != "" {
 		return fmt.Sprintf("webhook %s failed for %s: %v", e.Op, e.Path, e.Err)
 	}
@@ -29,7 +29,7 @@ func (e *WebhookError) Error() string {
 // Unwrap implements the error unwrapping interface.
 // It returns the underlying error to support error chains and
 // work with errors.Is and errors.As.
-func (e *WebhookError) Unwrap() error {
+func (e *Error) Unwrap() error {
 	return e.Err
 }
 
@@ -40,7 +40,7 @@ func (e *WebhookError) Unwrap() error {
 // newDecodeError creates an error for JSON decoding failures.
 // Used when unmarshaling admission reviews or pod specifications fails.
 func newDecodeError(err error, resourcePath string) error {
-	return &WebhookError{
+	return &Error{
 		Op:   "decode",
 		Path: resourcePath,
 		Err:  err,
@@ -50,7 +50,7 @@ func newDecodeError(err error, resourcePath string) error {
 // newValidationError creates an error for validation failures.
 // Used when pod specifications or configurations fail validation checks.
 func newValidationError(err error, resourcePath string) error {
-	return &WebhookError{
+	return &Error{
 		Op:   "validate",
 		Path: resourcePath,
 		Err:  err,
@@ -60,7 +60,7 @@ func newValidationError(err error, resourcePath string) error {
 // newPatchError creates an error for patch creation or application failures.
 // Used when generating or applying JSON patches to pods fails.
 func newPatchError(err error, resourcePath string) error {
-	return &WebhookError{
+	return &Error{
 		Op:   "patch",
 		Path: resourcePath,
 		Err:  err,
