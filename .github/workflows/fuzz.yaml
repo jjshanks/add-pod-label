@@ -9,7 +9,7 @@ on:
       - '**.go'
       - 'go.*'
       - '.github/workflows/fuzz.yml'
-  
+
   # Extended fuzz tests nightly
   schedule:
     - cron: '0 0 * * *'  # midnight UTC
@@ -20,19 +20,19 @@ jobs:
     # Only run quick fuzz on PRs
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.23"
           cache: true
-      
+
       - name: Run Quick Fuzz Tests
         run: make fuzz
-      
+
       - name: Upload Fuzz Findings
         if: failure()
         uses: actions/upload-artifact@v4
@@ -47,21 +47,21 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 60  # Prevent excessive resource usage
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.23"
           cache: true
-      
+
       - name: Run Extended Fuzz Tests
         run: |
           go test -fuzz=FuzzCreatePatch -fuzztime=15m ./internal/webhook/
           go test -fuzz=FuzzHandleMutate -fuzztime=15m ./internal/webhook/
-      
+
       - name: Upload Fuzz Findings
         if: failure()
         uses: actions/upload-artifact@v4
@@ -69,7 +69,7 @@ jobs:
           name: fuzz-findings-extended
           path: internal/webhook/testdata/fuzz/
           retention-days: 30
-      
+
       - name: Create Issue on Failure
         if: failure()
         uses: actions/github-script@v7

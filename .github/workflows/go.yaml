@@ -8,7 +8,7 @@ on:
       - "docs/**"
       - "LICENSE"
 
-permissions: # Explicitly define minimum required permissions
+permissions:  # Explicitly define minimum required permissions
   contents: read
   pull-requests: write
 
@@ -38,7 +38,7 @@ jobs:
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
-        if: always() # Upload coverage even if tests fail
+        if: always()  # Upload coverage even if tests fail
         with:
           name: coverage-report
           path: coverage.html

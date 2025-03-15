@@ -17,8 +17,8 @@ on:
     tags: ["v*.*.*"]
 
 permissions:
-  contents: write # Required for creating releases
-  packages: write # Required for pushing to GHCR
+  contents: write  # Required for creating releases
+  packages: write  # Required for pushing to GHCR
 
 jobs:
   validate-version:
@@ -61,7 +61,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Required to access git history for tag creation
+          fetch-depth: 0  # Required to access git history for tag creation
 
       - name: Configure Git
         # Set up Git credentials for creating and pushing the tag
@@ -87,17 +87,17 @@ jobs:
       always() &&
       (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && needs.validate-version.result == 'success'))
     runs-on: ubuntu-latest
-    timeout-minutes: 30 # Set timeout to prevent hanging builds
+    timeout-minutes: 30  # Set timeout to prevent hanging builds
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Required for GoReleaser to generate changelogs
+          fetch-depth: 0  # Required for GoReleaser to generate changelogs
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.23"
-          cache: true # Enable Go modules cache
+          cache: true  # Enable Go modules cache
 
       - name: Login to GHCR
         # Required for pushing container images to GitHub Container Registry
@@ -115,15 +115,15 @@ jobs:
         # Configure Docker for multi-platform builds
         uses: docker/setup-buildx-action@v3
         with:
-          platforms: linux/amd64,linux/arm64 # Specify target platforms for container images
+          platforms: linux/amd64,linux/arm64  # Specify target platforms for container images
 
       - name: Run GoReleaser
         # Build binaries, create release, and push container images
         uses: goreleaser/goreleaser-action@v6
         with:
-          distribution: goreleaser # Use OSS version of GoReleaser
+          distribution: goreleaser  # Use OSS version of GoReleaser
           version: "~> v2"
-          args: release --clean # Clean before building
+          args: release --clean  # Clean before building
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
