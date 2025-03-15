@@ -564,8 +564,8 @@ func TestServerShutdownSignals(t *testing.T) {
 					continue
 				}
 
-				resp, err := client.Get(fmt.Sprintf("https://%s/healthz", addr))
-				if err == nil {
+				resp, healthErr := client.Get(fmt.Sprintf("https://%s/healthz", addr))
+				if healthErr == nil {
 					resp.Body.Close()
 					if resp.StatusCode == http.StatusOK {
 						break
@@ -577,10 +577,10 @@ func TestServerShutdownSignals(t *testing.T) {
 
 			// Send shutdown signal
 			t.Logf("Sending %s signal...", tc.name)
-			p, err := os.FindProcess(os.Getpid())
-			require.NoError(t, err)
-			err = p.Signal(tc.signal)
-			require.NoError(t, err)
+			p, processErr := os.FindProcess(os.Getpid())
+			require.NoError(t, processErr)
+			signalErr := p.Signal(tc.signal)
+			require.NoError(t, signalErr)
 
 			// Wait for shutdown
 			select {
@@ -593,8 +593,8 @@ func TestServerShutdownSignals(t *testing.T) {
 			wg.Wait()
 
 			// Verify server is no longer accepting connections
-			_, err = client.Get(fmt.Sprintf("https://%s/healthz", addr))
-			assert.Error(t, err)
+			_, healthErr := client.Get(fmt.Sprintf("https://%s/healthz", addr))
+			assert.Error(t, healthErr)
 		})
 	}
 }
@@ -635,7 +635,7 @@ func TestServerShutdownTimeout(t *testing.T) {
 	// Start server listener in a goroutine
 	go func() {
 		close(serverStarted)
-		err := srv.server.ListenAndServeTLS(srv.config.CertFile, srv.config.KeyFile)
+		err = srv.server.ListenAndServeTLS(srv.config.CertFile, srv.config.KeyFile)
 		if err != nil && err != http.ErrServerClosed {
 			serverStopped <- err
 		}
