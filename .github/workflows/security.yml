@@ -2,22 +2,22 @@ name: Security
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   schedule:
-    - cron: '0 0 * * 0' # Weekly on Sundays
+    - cron: '0 0 * * 0'  # Weekly on Sundays
 
 permissions:
   contents: read
-  security-events: write # Required for uploading security scan results
+  security-events: write  # Required for uploading security scan results
 
 jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -90,12 +90,12 @@ jobs:
         id: scan
         if: always()
         with:
-          image: "pod-label-webhook:latest" 
+          image: "pod-label-webhook:latest"
           fail-build: false
           severity-cutoff: high
           output-format: "sarif"
 
-      - name: Upload Anchore scan results 
+      - name: Upload Anchore scan results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
@@ -107,27 +107,27 @@ jobs:
           echo "### Security Scan Summary" >> $GITHUB_STEP_SUMMARY
           echo "| Scanner | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
-          
+
           # Check Gosec results
           if [ -f "scan-results/gosec.sarif" ]; then
             echo "| Gosec | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| Gosec | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           # Check Trivy results
           if [ -f "scan-results/trivy-fs.sarif" ]; then
             echo "| Trivy Filesystem | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| Trivy Filesystem | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           if [ -f "scan-results/trivy-image.sarif" ]; then
             echo "| Trivy Image | ✅ Completed |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| Trivy Image | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi
-          
+
           # Check Anchore results
           if [ -f "scan-results/anchore.sarif" ]; then
             echo "| Anchore | ✅ Completed |" >> $GITHUB_STEP_SUMMARY

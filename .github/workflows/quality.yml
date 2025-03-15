@@ -9,9 +9,9 @@ on:
       - "LICENSE"
 
 permissions:
-  contents: write # Required for pushing format fixes
-  security-events: write # Required for uploading code scanning results
-  pull-requests: write # Required for pushing format fixes
+  contents: write  # Required for pushing format fixes
+  security-events: write  # Required for uploading code scanning results
+  pull-requests: write  # Required for pushing format fixes
   checks: write
 
 jobs:
