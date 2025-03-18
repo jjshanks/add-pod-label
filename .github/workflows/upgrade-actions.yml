@@ -1,0 +1,71 @@
+name: Weekly GitHub Actions Upgrade
+
+on:
+  schedule:
+    # Run every Monday at 3:00 AM UTC
+    - cron: '0 3 * * 1'
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  upgrade-actions:
+    name: Upgrade GitHub Actions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # Full git history is needed to create commits with proper authorship
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install semver requests
+
+      - name: Run GitHub Action SHA pinning and upgrade
+        run: |
+          python .github/pin_actions.py .github/workflows --upgrade
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for changes
+        id: check-changes
+        run: |
+          if [[ $(git status --porcelain) ]]; then
+            echo "changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        if: steps.check-changes.outputs.changes == 'true'
+        uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: upgrade GitHub Action pins to latest versions"
+          title: "🔄 Update GitHub Actions to latest versions"
+          body: |
+            This is an automated PR to update GitHub Actions to their latest versions.
+
+            The following changes were made:
+            - Updated SHA pins for GitHub Actions
+            - Upgraded Actions to their latest patches and minor versions
+
+            This helps maintain security and functionality without introducing breaking changes.
+          branch: github-action-updates
+          base: ${{ github.ref_name }}
+          labels: |
+            dependencies
+            automated
+          delete-branch: true
