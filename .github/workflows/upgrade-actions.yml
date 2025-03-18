@@ -31,11 +31,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install semver requests
-
-      - name: Run GitHub Action SHA pinning and upgrade
-        run: |
-          python .github/pin_actions.py .github/workflows --upgrade
+          pip install -r .github/requirements.txt
+      - name: Upgrade GitHub Actions
+        run: python .github/pin_actions.py .github/workflows --upgrade
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
