@@ -52,7 +52,7 @@ jobs:
           fi
 
       - name: YAML lint
-        uses: ibiqlik/action-yamllint@7bd28a7b0660fe57c5c3fa5cada81affb7dbe1ab # v3.1
+        uses: ibiqlik/action-yamllint@2576378a8e339169678f9939646ee3ee325e845c # v3.1
         with:
           file_or_dir: test/e2e/manifests/
           config_file: .yamllint.yml
