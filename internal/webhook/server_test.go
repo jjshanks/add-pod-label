@@ -361,12 +361,18 @@ func NewTestServer(cfg *config.Config, reg prometheus.Registerer) (*Server, erro
 		return nil, fmt.Errorf("failed to initialize metrics: %w", err)
 	}
 
+	// Create disabled tracer for tests
+	tr := &tracer{
+		enabled: false,
+	}
+
 	// Create server instance
 	srv := &Server{
 		logger:          logger,
 		config:          cfg,
 		health:          newHealthState(realClock{}),
 		metrics:         m,
+		tracer:          tr,
 		gracefulTimeout: 5 * time.Second,
 		serverMu:        sync.RWMutex{},
 	}
@@ -374,12 +380,17 @@ func NewTestServer(cfg *config.Config, reg prometheus.Registerer) (*Server, erro
 	// Set up the server manually for testing
 	mux := http.NewServeMux()
 
-	// Wrap handlers with metrics middleware
-	mux.Handle("/mutate", srv.metrics.metricsMiddleware(http.HandlerFunc(srv.handleMutate)))
-	mux.Handle("/healthz", srv.metrics.metricsMiddleware(http.HandlerFunc(srv.handleLiveness)))
-	mux.Handle("/readyz", srv.metrics.metricsMiddleware(http.HandlerFunc(srv.handleReadiness)))
+	// Create middleware chain - matching real server (tracing first, then metrics)
+	handleWithMiddleware := func(handler http.HandlerFunc) http.Handler {
+		return srv.tracingMiddleware(srv.metrics.metricsMiddleware(handler))
+	}
 
-	// Add metrics endpoint
+	// Apply middleware chain to handlers
+	mux.Handle("/mutate", handleWithMiddleware(srv.handleMutate))
+	mux.Handle("/healthz", handleWithMiddleware(srv.handleLiveness))
+	mux.Handle("/readyz", handleWithMiddleware(srv.handleReadiness))
+
+	// Add metrics endpoint with only metrics middleware (no tracing)
 	mux.Handle("/metrics", srv.metrics.handler())
 
 	// Initialize HTTP server with secure defaults

@@ -1,4 +1,4 @@
-.PHONY: all build test clean build deploy undeploy lint lint-yaml lint-all verify fuzz fmt
+.PHONY: all build test clean build deploy undeploy lint lint-yaml lint-all verify fuzz fmt test-integration-trace
 
 # Default target
 all: build
@@ -18,6 +18,14 @@ test-integration:
 	$(MAKE) build && \
 	./test/integration/kind-deploy.sh && \
 	./test/integration/integ-test.sh
+
+# Run integration tests with tracing enabled
+test-integration-trace:
+	trap './test/integration/delete-kind-cluster.sh' EXIT; \
+	./test/integration/create-kind-cluster.sh && \
+	$(MAKE) build && \
+	./test/integration/kind-deploy-trace.sh && \
+	./test/integration/integ-test-trace.sh
 
 # Run fuzz tests (default 1m duration)
 fuzz:

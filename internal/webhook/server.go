@@ -44,19 +44,20 @@ const (
 )
 
 // Server represents the webhook server instance.
-// It manages the HTTP server, metrics, logging, and health state.
+// It manages the HTTP server, metrics, logging, health state, and tracing.
 type Server struct {
 	logger          zerolog.Logger // Structured logger for server events
 	config          *config.Config // Server configuration
 	health          *healthState   // Server health tracking
 	metrics         *metrics       // Prometheus metrics collection
+	tracer          *tracer        // OpenTelemetry tracer
 	server          *http.Server   // Underlying HTTP server
 	gracefulTimeout time.Duration  // Maximum time to wait during shutdown
 	serverMu        sync.RWMutex   // Protects server field during updates
 }
 
 // NewServer creates a new webhook server instance with the provided configuration.
-// It initializes logging, metrics collection, and server settings with secure defaults.
+// It initializes logging, metrics collection, tracing, and server settings with secure defaults.
 func NewServer(cfg *config.Config) (*Server, error) {
 	// Create base logger with common fields
 	logger := zerolog.New(os.Stdout).With().
@@ -85,12 +86,43 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize metrics: %w", err)
 	}
+	
+	// Initialize OpenTelemetry tracer if enabled
+	var tr *tracer
+	if cfg.TracingEnabled {
+		// We derive the endpoint from config
+		endpoint := cfg.TracingEndpoint
+		if endpoint == "" {
+			logger.Info().Msg("Tracing enabled but no endpoint specified, using default localhost:4317")
+			endpoint = "localhost:4317"
+		}
+		
+		ctx := context.Background()
+		tr, err = initTracer(ctx, 
+			cfg.ServiceNamespace,
+			cfg.ServiceName,
+			cfg.ServiceVersion,
+			endpoint,
+			cfg.TracingInsecure)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize tracer: %w", err)
+		}
+		logger.Info().
+			Str("endpoint", endpoint).
+			Bool("insecure", cfg.TracingInsecure).
+			Msg("OpenTelemetry tracing initialized")
+	} else {
+		// Create disabled tracer
+		tr = &tracer{enabled: false}
+		logger.Info().Msg("OpenTelemetry tracing is disabled")
+	}
 
 	return &Server{
 		logger:          logger,
 		config:          cfg,
 		health:          newHealthState(realClock{}),
 		metrics:         m,
+		tracer:          tr,
 		gracefulTimeout: defaultGracefulTimeout,
 		serverMu:        sync.RWMutex{},
 	}, nil
@@ -118,12 +150,19 @@ func (s *Server) Run() error {
 	// Set up HTTP routes
 	mux := http.NewServeMux()
 
-	// Wrap handlers with metrics middleware
-	mux.Handle("/mutate", s.metrics.metricsMiddleware(http.HandlerFunc(s.handleMutate)))
-	mux.Handle("/healthz", s.metrics.metricsMiddleware(http.HandlerFunc(s.handleLiveness)))
-	mux.Handle("/readyz", s.metrics.metricsMiddleware(http.HandlerFunc(s.handleReadiness)))
+	// Create middleware chain - tracing first, then metrics
+	// This ensures spans are created before metrics are collected
+	handleWithMiddleware := func(handler http.HandlerFunc) http.Handler {
+		// First apply tracing, then metrics
+		return s.tracingMiddleware(s.metrics.metricsMiddleware(handler))
+	}
 
-	// Add metrics endpoint
+	// Apply middleware chain to handlers
+	mux.Handle("/mutate", handleWithMiddleware(s.handleMutate))
+	mux.Handle("/healthz", handleWithMiddleware(s.handleLiveness))
+	mux.Handle("/readyz", handleWithMiddleware(s.handleReadiness))
+
+	// Add metrics endpoint with only metrics middleware (no tracing)
 	mux.Handle("/metrics", s.metrics.handler())
 
 	// Initialize HTTP server with secure defaults
@@ -189,6 +228,7 @@ func (s *Server) Run() error {
 // - Marks the server as not ready to prevent new requests
 // - Updates health metrics
 // - Waits for in-flight requests to complete
+// - Shuts down the tracer provider
 // - Enforces a timeout for shutdown completion
 func (s *Server) shutdown() error {
 	// Mark server as not ready
@@ -209,12 +249,25 @@ func (s *Server) shutdown() error {
 	s.serverMu.RUnlock()
 
 	// Shutdown server gracefully
+	var shutdownErr error
 	if err := server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("error during server shutdown: %v", err)
+		shutdownErr = fmt.Errorf("error during server shutdown: %v", err)
+	}
+
+	// Shutdown tracer if it's enabled
+	if s.tracer != nil && s.tracer.enabled {
+		s.logger.Debug().Msg("Shutting down tracer")
+		if err := s.tracer.shutdown(ctx); err != nil {
+			// Log error but continue shutdown
+			s.logger.Error().Err(err).Msg("Error shutting down tracer")
+			if shutdownErr == nil {
+				shutdownErr = fmt.Errorf("error during tracer shutdown: %v", err)
+			}
+		}
 	}
 
 	s.logger.Info().Msg("Server shutdown completed")
-	return nil
+	return shutdownErr
 }
 
 // GetAddr returns the server's current address in a thread-safe way.

@@ -39,7 +39,27 @@ make test
 
 # Run integration tests (requires Kind)
 make test-integration
+
+# Run integration tests with tracing enabled (requires Kind)
+make test-integration-trace
 ```
+
+### Tracing Tests
+
+The tracing integration tests verify OpenTelemetry tracing functionality:
+
+1. Deploy an OpenTelemetry collector alongside the webhook
+2. Configure the webhook to send traces to the collector
+3. Generate webhook traffic by creating test pods
+4. Verify traces are collected by the OpenTelemetry collector
+5. Validate span attributes and parent-child relationships
+
+The following spans are verified in the trace tests:
+- HTTP request spans from middleware
+- Webhook handler spans
+- Decode/unmarshal spans
+- Patch creation spans
+- Response preparation spans
 
 ## Health Check Testing
 

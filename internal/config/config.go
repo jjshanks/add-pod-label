@@ -36,18 +36,37 @@ type Config struct {
 	// Logging configuration
 	LogLevel string // Log level (trace, debug, info, warn, error, fatal, panic)
 	Console  bool   // Whether to use console-formatted logging instead of JSON
+	
+	// Tracing configuration
+	TracingEnabled      bool   // Whether OpenTelemetry tracing is enabled
+	TracingEndpoint     string // OpenTelemetry collector endpoint (e.g., "otel-collector:4317")
+	TracingInsecure     bool   // Whether to use insecure connection to the collector
+	ServiceNamespace    string // Namespace of the service for resource attribution
+	ServiceName         string // Name of the service for resource attribution
+	ServiceVersion      string // Version of the service for resource attribution
 }
 
 // New creates a new Config with default values.
 // These defaults can be overridden by environment variables, config file, or flags.
 func New() *Config {
 	return &Config{
+		// Server defaults
 		Address:         "0.0.0.0:8443",
 		CertFile:        "/etc/webhook/certs/tls.crt",
 		KeyFile:         "/etc/webhook/certs/tls.key",
 		GracefulTimeout: 30 * time.Second,
+		
+		// Logging defaults
 		LogLevel:        "info",
 		Console:         false,
+		
+		// Tracing defaults
+		TracingEnabled:      false,
+		TracingEndpoint:     "",
+		TracingInsecure:     false,
+		ServiceNamespace:    "default",
+		ServiceName:         "pod-label-webhook",
+		ServiceVersion:      "dev",
 	}
 }
 
@@ -153,12 +172,23 @@ func LoadConfig(cfgFile string) (*Config, error) {
 
 	// Bind configuration keys
 	configKeys := []string{
+		// Server settings
 		"address",
 		"cert-file",
 		"key-file",
 		"graceful-timeout",
+		
+		// Logging settings
 		"log-level",
 		"console",
+		
+		// Tracing settings
+		"tracing-enabled",
+		"tracing-endpoint",
+		"tracing-insecure",
+		"service-namespace",
+		"service-name",
+		"service-version",
 	}
 
 	// Bind each configuration key to environment variables
@@ -229,6 +259,7 @@ func LoadConfig(cfgFile string) (*Config, error) {
 	}
 
 	// Update config from viper (environment variables or config file values)
+	// Server configuration
 	if viper.IsSet("address") {
 		config.Address = viper.GetString("address")
 	}
@@ -237,12 +268,6 @@ func LoadConfig(cfgFile string) (*Config, error) {
 	}
 	if viper.IsSet("key-file") {
 		config.KeyFile = viper.GetString("key-file")
-	}
-	if viper.IsSet("log-level") {
-		config.LogLevel = viper.GetString("log-level")
-	}
-	if viper.IsSet("console") {
-		config.Console = viper.GetBool("console")
 	}
 	if viper.IsSet("graceful-timeout") {
 		rawValue := viper.GetString("graceful-timeout")
@@ -253,6 +278,34 @@ func LoadConfig(cfgFile string) (*Config, error) {
 		} else {
 			return nil, fmt.Errorf("invalid graceful timeout value: %s (must be duration string or positive integer)", rawValue)
 		}
+	}
+	
+	// Logging configuration
+	if viper.IsSet("log-level") {
+		config.LogLevel = viper.GetString("log-level")
+	}
+	if viper.IsSet("console") {
+		config.Console = viper.GetBool("console")
+	}
+	
+	// Tracing configuration
+	if viper.IsSet("tracing-enabled") {
+		config.TracingEnabled = viper.GetBool("tracing-enabled")
+	}
+	if viper.IsSet("tracing-endpoint") {
+		config.TracingEndpoint = viper.GetString("tracing-endpoint")
+	}
+	if viper.IsSet("tracing-insecure") {
+		config.TracingInsecure = viper.GetBool("tracing-insecure")
+	}
+	if viper.IsSet("service-namespace") {
+		config.ServiceNamespace = viper.GetString("service-namespace")
+	}
+	if viper.IsSet("service-name") {
+		config.ServiceName = viper.GetString("service-name")
+	}
+	if viper.IsSet("service-version") {
+		config.ServiceVersion = viper.GetString("service-version")
 	}
 
 	return config, nil

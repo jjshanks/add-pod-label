@@ -87,11 +87,23 @@ cleanup() {
     echo "Cleaning up test resources..."
     # Kill port forwarding if it exists
     if [ -n "${PORT_FORWARD_PID:-}" ]; then
-        echo "Stopping port forwarding process..."
+        echo "Stopping webhook port forwarding process..."
         kill $PORT_FORWARD_PID || true
         wait $PORT_FORWARD_PID 2>/dev/null || true
     fi
+    
+    # Kill otel port forwarding if it exists
+    if [ -n "${OTEL_PORT_FORWARD_PID:-}" ]; then
+        echo "Stopping OpenTelemetry collector port forwarding process..."
+        kill $OTEL_PORT_FORWARD_PID || true
+        wait $OTEL_PORT_FORWARD_PID 2>/dev/null || true
+    fi
+    
     # Delete test resources
     echo "Deleting test deployments..."
     kubectl delete -f test/e2e/manifests/test-deployment.yaml --ignore-not-found
+    kubectl delete -f test/e2e/manifests/test-deployment-trace.yaml --ignore-not-found
+    
+    # Delete additional test pods if they exist
+    kubectl delete pod trace-test-pod --ignore-not-found --wait=false
 }
