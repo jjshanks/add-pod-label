@@ -11,8 +11,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
-	"github.com/jjshanks/pod-label-webhook/internal/config"
-	"github.com/jjshanks/pod-label-webhook/internal/webhook"
+	"github.com/jjshanks/add-pod-label/internal/config"
+	"github.com/jjshanks/add-pod-label/internal/webhook"
 )
 
 // Configuration variables and root command definition

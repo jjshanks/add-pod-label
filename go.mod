@@ -1,4 +1,4 @@
-module github.com/jjshanks/pod-label-webhook
+module github.com/jjshanks/add-pod-label
 
 go 1.24.1
 

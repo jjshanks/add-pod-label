@@ -50,7 +50,7 @@ spec:
 
 ## Prerequisites
 
-- Go 1.23+
+- Go 1.24+
 - Docker
 - Kind (for local development)
 - kubectl
@@ -64,8 +64,8 @@ spec:
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/jjshanks/pod-label-webhook.git
-cd pod-label-webhook
+git clone https://github.com/jjshanks/add-pod-label.git
+cd add-pod-label
 ```
 
 2. Build and run tests:
@@ -93,7 +93,7 @@ kubectl apply -f manifests/
 Pre-built images are available from GitHub Container Registry:
 
 ```bash
-ghcr.io/jjshanks/pod-label-webhook:latest
+ghcr.io/jjshanks/add-pod-label:latest
 ```
 
 ## Configuration
@@ -153,13 +153,26 @@ You can customize these settings by modifying the deployment manifest.
 ### Project Structure
 
 ```
-├── pkg/webhook/      # Core webhook implementation
-│   ├── cmd/         # Command Line Interface
-│   ├── webhook.go   # Main webhook logic
-│   └── *_test.go    # Tests
-├── tests/           # Test resources
-│   ├── manifests/   # Test deployment manifests
-│   └── scripts/     # Testing scripts
+├── cmd/             # Command line interface
+│   └── webhook/     # Main webhook command
+│       └── main.go  # Entry point
+├── internal/        # Private implementation code
+│   ├── config/      # Configuration handling
+│   └── webhook/     # Core webhook implementation
+│       ├── webhook.go   # Main webhook logic
+│       ├── server.go    # Server implementation
+│       ├── metrics.go   # Metrics collection
+│       ├── health.go    # Health checking
+│       ├── error.go     # Error types
+│       ├── clock.go     # Time utilities
+│       └── *_test.go    # Tests
+├── pkg/             # Public API packages
+│   └── k8s/         # Kubernetes utilities
+├── test/            # Test resources
+│   ├── e2e/         # End-to-end tests
+│   │   └── manifests/  # Test deployment manifests
+│   └── integration/ # Integration test scripts
+├── dashboards/      # Grafana dashboards
 └── Dockerfile       # Container build definition
 ```
 

@@ -17,7 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 
-	"github.com/jjshanks/pod-label-webhook/internal/config"
+	"github.com/jjshanks/add-pod-label/internal/config"
 )
 
 const (
