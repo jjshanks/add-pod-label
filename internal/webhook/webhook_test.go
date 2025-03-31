@@ -49,11 +49,17 @@ func newTestServer(t *testing.T) *TestServer {
 		t.Fatalf("Failed to initialize metrics: %v", err)
 	}
 
+	// Create a disabled tracer for tests
+	tr := &tracer{
+		enabled: false,
+	}
+
 	server := &Server{
 		logger:  logger,
 		config:  cfg,
 		metrics: m,
 		health:  newHealthState(realClock{}),
+		tracer:  tr,
 	}
 
 	return &TestServer{

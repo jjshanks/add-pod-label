@@ -8,6 +8,9 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -190,9 +193,12 @@ func (s *Server) createPatch(pod *corev1.Pod) ([]byte, error) {
 // 3. Generates a patch to modify pod labels
 // 4. Sends an admission review response
 //
-// Handles various error scenarios and provides detailed logging
+// Handles various error scenarios and provides detailed logging and tracing
 func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
-	// Generate a unique request ID for tracing
+	// Get context from request (which may contain trace span from middleware)
+	ctx := r.Context()
+	
+	// Generate a unique request ID for tracing and logging
 	reqID := r.Header.Get("X-Request-ID")
 	if reqID == "" {
 		reqID = uuid.New().String()
@@ -204,6 +210,20 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 		Str("handler", "mutate").
 		Logger()
 
+	// Start a span for this handler (child of the middleware's span)
+	if s.tracer.enabled {
+		var span trace.Span
+		var err error
+		ctx, span, err = s.tracer.startSpan(ctx, "handle_mutate", 
+			"request_id", reqID,
+		)
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to create span for handle_mutate")
+		} else {
+			defer span.End()
+		}
+	}
+	
 	// Read the entire request body
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -221,13 +241,34 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Start a span for decoding operation
+	var decodeSpan trace.Span
+	if s.tracer.enabled {
+		var err error
+		_, decodeSpan, err = s.tracer.startSpan(ctx, "decode_admission_review")
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to create span for decode_admission_review")
+		} else {
+			defer decodeSpan.End()
+		}
+	}
+	
 	// Decode the admission review
 	admissionReview := &admissionv1.AdmissionReview{}
 	if _, _, decodeErr := deserializer.Decode(body, nil, admissionReview); decodeErr != nil {
 		err = newDecodeError(decodeErr, "admission review")
 		logger.Error().Err(err).Msg("Decode failed")
+		if s.tracer.enabled {
+			decodeSpan.RecordError(err)
+			decodeSpan.SetStatus(codes.Error, err.Error())
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	
+	// Mark decode span as successful
+	if s.tracer.enabled {
+		decodeSpan.SetStatus(codes.Ok, "")
 	}
 
 	// Validate admission review request
@@ -242,27 +283,92 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add request UID to logger context
+	// Add request UID to logger context and span
 	logger = logger.With().Str("uid", string(request.UID)).Logger()
+	if s.tracer.enabled {
+		span := trace.SpanFromContext(ctx)
+		span.SetAttributes(attribute.String("request.uid", string(request.UID)))
+	}
 
+	// Start a span for pod unmarshaling
+	var podSpan trace.Span
+	if s.tracer.enabled {
+		var err error
+		_, podSpan, err = s.tracer.startSpan(ctx, "unmarshal_pod")
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to create span for unmarshal_pod")
+		} else {
+			defer podSpan.End()
+		}
+	}
+	
 	// Unmarshal the pod from the request
 	pod := &corev1.Pod{}
 	if unmarshalErr := json.Unmarshal(request.Object.Raw, pod); unmarshalErr != nil {
 		err = newDecodeError(unmarshalErr, fmt.Sprintf("pod/%s", pod.Name))
 		logger.Error().Err(err).Msg("Pod unmarshal failed")
+		if s.tracer.enabled {
+			podSpan.RecordError(err)
+			podSpan.SetStatus(codes.Error, err.Error())
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	
+	// Set pod attributes in span
+	if s.tracer.enabled && pod != nil {
+		podSpan.SetAttributes(
+			attribute.String("pod.name", pod.Name),
+			attribute.String("pod.namespace", pod.Namespace),
+		)
+		podSpan.SetStatus(codes.Ok, "")
+	}
 
+	// Start span for creating patch
+	var patchSpan trace.Span
+	if s.tracer.enabled {
+		var err error
+		_, patchSpan, err = s.tracer.startSpan(ctx, "create_patch",
+			"pod.name", pod.Name,
+			"pod.namespace", pod.Namespace,
+		)
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to create span for create_patch")
+		} else {
+			defer patchSpan.End()
+		}
+	}
+	
 	// Create label patch
 	patchBytes, err := s.createPatch(pod)
 	if err != nil {
 		err = newPatchError(err, fmt.Sprintf("pod/%s", pod.Name))
 		logger.Error().Err(err).Msg("Patch creation failed")
+		if s.tracer.enabled {
+			patchSpan.RecordError(err)
+			patchSpan.SetStatus(codes.Error, err.Error())
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	
+	// Mark patch span as successful
+	if s.tracer.enabled {
+		patchSpan.SetStatus(codes.Ok, "")
+	}
 
+	// Start span for preparing response
+	var respSpan trace.Span
+	if s.tracer.enabled {
+		var err error
+		_, respSpan, err = s.tracer.startSpan(ctx, "prepare_response")
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to create span for prepare_response")
+		} else {
+			defer respSpan.End()
+		}
+	}
+	
 	// Prepare admission review response
 	patchType := admissionv1.PatchTypeJSONPatch
 	response := &admissionv1.AdmissionReview{
@@ -283,8 +389,17 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		err = fmt.Errorf("failed to marshal response: %w", err)
 		logger.Error().Err(err).Msg("Response marshal failed")
+		if s.tracer.enabled {
+			respSpan.RecordError(err)
+			respSpan.SetStatus(codes.Error, err.Error())
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	
+	// Mark response span as successful
+	if s.tracer.enabled {
+		respSpan.SetStatus(codes.Ok, "")
 	}
 
 	// Write response

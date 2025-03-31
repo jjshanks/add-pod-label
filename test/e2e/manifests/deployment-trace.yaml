@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pod-label-webhook
+  namespace: webhook-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pod-label-webhook
+  template:
+    metadata:
+      labels:
+        app: pod-label-webhook
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8443"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: webhook
+          image: ghcr.io/jjshanks/pod-label-webhook:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--cert-file=/tls/tls.crt"
+            - "--key-file=/tls/tls.key"
+          env:
+            - name: WEBHOOK_LOG_LEVEL
+              value: "info"
+            - name: WEBHOOK_CERT_FILE
+              value: "/tls/tls.crt"
+            - name: WEBHOOK_KEY_FILE
+              value: "/tls/tls.key"
+            # Tracing configuration
+            - name: WEBHOOK_TRACING_ENABLED
+              value: "true"
+            - name: WEBHOOK_TRACING_ENDPOINT
+              value: "otel-collector:4317"
+            - name: WEBHOOK_TRACING_INSECURE
+              value: "true"
+            - name: WEBHOOK_SERVICE_NAMESPACE
+              value: "webhook-test"
+            - name: WEBHOOK_SERVICE_NAME
+              value: "pod-label-webhook"
+            - name: WEBHOOK_SERVICE_VERSION
+              value: "test"
+          ports:
+            - name: webhook
+              containerPort: 8443
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+            requests:
+              memory: "64Mi"
+              cpu: "250m"
+          volumeMounts:
+            - name: cert
+              mountPath: /tls
+              readOnly: true
+      volumes:
+        - name: cert
+          secret:
+            secretName: pod-label-webhook-cert
+            defaultMode: 0600
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pod-label-webhook
+  namespace: webhook-test
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8443"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+    - port: 443
+      targetPort: 8443
+      name: webhook
+    - port: 8443
+      targetPort: 8443
+      name: metrics
+  selector:
+    app: pod-label-webhook

@@ -72,6 +72,14 @@ func init() {
 	rootCmd.Flags().String("address", "0.0.0.0:8443", "The address and port to listen on (e.g., 0.0.0.0:8443)")
 	rootCmd.Flags().String("cert-file", "/etc/webhook/certs/tls.crt", "Path to the TLS certificate file")
 	rootCmd.Flags().String("key-file", "/etc/webhook/certs/tls.key", "Path to the TLS key file")
+	
+	// Tracing flags
+	rootCmd.Flags().Bool("tracing-enabled", false, "Enable OpenTelemetry tracing")
+	rootCmd.Flags().String("tracing-endpoint", "", "OpenTelemetry collector endpoint (e.g., otel-collector:4317)")
+	rootCmd.Flags().Bool("tracing-insecure", false, "Use insecure connection to the collector")
+	rootCmd.Flags().String("service-namespace", "default", "Namespace of the service for resource attribution")
+	rootCmd.Flags().String("service-name", "pod-label-webhook", "Name of the service for resource attribution")
+	rootCmd.Flags().String("service-version", "dev", "Version of the service for resource attribution")
 }
 
 // main is the entry point for the webhook server.
