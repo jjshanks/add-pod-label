@@ -19,18 +19,18 @@ kubectl wait --for=condition=Available --timeout=60s -n default deployment/integ
 kubectl wait --for=condition=Available --timeout=60s -n default deployment/integ-test-no-label
 
 echo "Checking webhook pod health status..."
-WEBHOOK_POD=$(kubectl get pods -n webhook-test -l app=pod-label-webhook -o jsonpath='{.items[0].metadata.name}')
+WEBHOOK_POD=$(kubectl get pods -n webhook-test -l app=add-pod-label -o jsonpath='{.items[0].metadata.name}')
 
 # Wait for pod to be ready
 echo "Waiting for webhook pod to be ready..."
 kubectl wait --for=condition=Ready --timeout=60s -n webhook-test pod/$WEBHOOK_POD
 
 # Get the service port
-WEBHOOK_PORT=$(kubectl get service pod-label-webhook -n webhook-test -o jsonpath='{.spec.ports[0].port}')
+WEBHOOK_PORT=$(kubectl get service add-pod-label -n webhook-test -o jsonpath='{.spec.ports[0].port}')
 
 # Setup port forwarding
 echo "Setting up port forwarding..."
-kubectl port-forward -n webhook-test service/pod-label-webhook $LOCAL_PORT:$WEBHOOK_PORT &
+kubectl port-forward -n webhook-test service/add-pod-label $LOCAL_PORT:$WEBHOOK_PORT &
 PORT_FORWARD_PID=$!
 
 # Wait for port forwarding to be established
@@ -69,21 +69,21 @@ echo "Verifying metrics..."
 sleep 5
 
 # Check readiness status first
-if ! check_metric "pod_label_webhook_readiness_status" "" "1" "Webhook readiness" "$LOCAL_PORT"; then
+if ! check_metric "add_pod_label_readiness_status" "" "1" "Webhook readiness" "$LOCAL_PORT"; then
     exit 1
 fi
 
 # Check request metrics
-if ! check_metric "pod_label_webhook_requests_total" 'method="POST",path="/mutate",status="200"' "1" "Successful mutate requests" "$LOCAL_PORT"; then
+if ! check_metric "add_pod_label_requests_total" 'method="POST",path="/mutate",status="200"' "1" "Successful mutate requests" "$LOCAL_PORT"; then
     exit 1
 fi
 
 # Check label operations
-if ! check_metric "pod_label_webhook_label_operations_total" 'namespace="default",operation="success"' "1" "Successful label operations" "$LOCAL_PORT"; then
+if ! check_metric "add_pod_label_label_operations_total" 'namespace="default",operation="success"' "1" "Successful label operations" "$LOCAL_PORT"; then
     exit 1
 fi
 
-if ! check_metric "pod_label_webhook_label_operations_total" 'namespace="default",operation="skipped"' "1" "Skipped label operations" "$LOCAL_PORT"; then
+if ! check_metric "add_pod_label_label_operations_total" 'namespace="default",operation="skipped"' "1" "Skipped label operations" "$LOCAL_PORT"; then
     exit 1
 fi
 

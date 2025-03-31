@@ -16,7 +16,7 @@ import (
 const (
 	// metricsNamespace defines the base namespace for all webhook metrics
 	// This ensures unique and consistent metric naming across the application
-	metricsNamespace = "pod_label_webhook"
+	metricsNamespace = "add_pod_label"
 
 	// Label operation results
 	labelOperationSuccess = "success"

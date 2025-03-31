@@ -18,7 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 )
 
-const annotationKey = "pod-label-webhook.jjshanks.github.com/add-hello-world"
+const annotationKey = "add-pod-label.jjshanks.github.com/add-hello-world"
 
 var (
 	runtimeScheme = runtime.NewScheme()

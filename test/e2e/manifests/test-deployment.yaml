@@ -37,7 +37,7 @@ spec:
       labels:
         app: integ-test-no-label
       annotations:
-        pod-label-webhook.jjshanks.github.com/add-hello-world: "false"
+        add-pod-label.jjshanks.github.com/add-hello-world: "false"
     spec:
       containers:
         - name: integ-test-no-label

@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jjshanks/pod-label-webhook/internal/config"
+	"github.com/jjshanks/add-pod-label/internal/config"
 )
 
 // portAllocator manages test port allocation to prevent conflicts
@@ -345,7 +345,7 @@ func NewTestServer(cfg *config.Config, reg prometheus.Registerer) (*Server, erro
 	// Create base logger with common fields
 	logger := zerolog.New(os.Stdout).With().
 		Timestamp().
-		Str("service", "pod-label-webhook").
+		Str("service", "add-pod-label").
 		Logger()
 
 	// Configure log level

@@ -8,21 +8,21 @@ metadata:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: pod-label-webhook-cert
+  name: add-pod-label-cert
   namespace: webhook-test
 spec:
   dnsNames:
-    - pod-label-webhook.webhook-test.svc
-    - pod-label-webhook.webhook-test.svc.cluster.local
+    - add-pod-label.webhook-test.svc
+    - add-pod-label.webhook-test.svc.cluster.local
   issuerRef:
     kind: Issuer
-    name: pod-label-selfsigned-issuer
-  secretName: pod-label-webhook-cert
+    name: add-pod-label-selfsigned-issuer
+  secretName: add-pod-label-cert
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
-  name: pod-label-selfsigned-issuer
+  name: add-pod-label-selfsigned-issuer
   namespace: webhook-test
 spec:
   selfSigned: {}
@@ -30,14 +30,14 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: pod-label-webhook
+  name: add-pod-label
   annotations:
-    cert-manager.io/inject-ca-from: webhook-test/pod-label-webhook-cert
+    cert-manager.io/inject-ca-from: webhook-test/add-pod-label-cert
 webhooks:
-  - name: pod-label.example.com
+  - name: add-pod-label.example.com
     clientConfig:
       service:
-        name: pod-label-webhook
+        name: add-pod-label
         namespace: webhook-test
         path: "/mutate"
       caBundle: ""

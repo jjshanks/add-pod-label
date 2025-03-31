@@ -19,7 +19,7 @@ import (
 
 const (
 	// tracerName is the name of the tracer used by the webhook
-	tracerName = "github.com/jjshanks/pod-label-webhook"
+	tracerName = "github.com/jjshanks/add-pod-label"
 )
 
 // tracer is responsible for managing OpenTelemetry tracing functionality.

@@ -17,7 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 
-	"github.com/jjshanks/pod-label-webhook/internal/config"
+	"github.com/jjshanks/add-pod-label/internal/config"
 )
 
 const (
@@ -62,7 +62,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	// Create base logger with common fields
 	logger := zerolog.New(os.Stdout).With().
 		Timestamp().
-		Str("service", "pod-label-webhook").
+		Str("service", "add-pod-label").
 		Logger()
 
 	// Configure log level

@@ -19,8 +19,8 @@ builds:
 
 dockers:
   - image_templates:
-      - "ghcr.io/jjshanks/pod-label-webhook:{{ .Version }}"
-      - "ghcr.io/jjshanks/pod-label-webhook:latest"
+      - "ghcr.io/jjshanks/add-pod-label:{{ .Version }}"
+      - "ghcr.io/jjshanks/add-pod-label:latest"
     dockerfile: goreleaser.dockerfile
     use: buildx
     build_flag_templates:

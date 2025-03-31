@@ -27,18 +27,18 @@ kubectl wait --for=condition=Available --timeout=60s -n default deployment/integ
 kubectl wait --for=condition=Available --timeout=60s -n default deployment/integ-test-trace
 
 echo "Checking webhook pod health status..."
-WEBHOOK_POD=$(kubectl get pods -n webhook-test -l app=pod-label-webhook -o jsonpath='{.items[0].metadata.name}')
+WEBHOOK_POD=$(kubectl get pods -n webhook-test -l app=add-pod-label -o jsonpath='{.items[0].metadata.name}')
 
 # Wait for pod to be ready
 echo "Waiting for webhook pod to be ready..."
 kubectl wait --for=condition=Ready --timeout=60s -n webhook-test pod/$WEBHOOK_POD
 
 # Get the service port
-WEBHOOK_PORT=$(kubectl get service pod-label-webhook -n webhook-test -o jsonpath='{.spec.ports[0].port}')
+WEBHOOK_PORT=$(kubectl get service add-pod-label -n webhook-test -o jsonpath='{.spec.ports[0].port}')
 
 # Setup port forwarding for webhook
 echo "Setting up port forwarding for webhook..."
-kubectl port-forward -n webhook-test service/pod-label-webhook $LOCAL_PORT:$WEBHOOK_PORT &
+kubectl port-forward -n webhook-test service/add-pod-label $LOCAL_PORT:$WEBHOOK_PORT &
 PORT_FORWARD_PID=$!
 
 # Wait for port forwarding to be established
@@ -108,12 +108,12 @@ echo "Checking OpenTelemetry collector logs for spans..."
 sleep 5  # Give a bit more time for spans to appear
 COLLECTOR_LOGS=$(kubectl logs -n webhook-test $OTEL_COLLECTOR_POD)
 
-# Directly check if pod-label-webhook appears in the logs
-if echo "$COLLECTOR_LOGS" | grep -q "pod-label-webhook"; then
-    echo "Found pod-label-webhook spans in collector logs!"
+# Directly check if add-pod-label appears in the logs
+if echo "$COLLECTOR_LOGS" | grep -q "add-pod-label"; then
+    echo "Found add-pod-label spans in collector logs!"
     SPAN_FOUND=true
 else
-    echo "No pod-label-webhook spans found in collector logs after $MAX_ATTEMPTS attempts"
+    echo "No add-pod-label spans found in collector logs after $MAX_ATTEMPTS attempts"
     echo "This is unexpected as the logs should contain the spans"
     # Setting to true to pass the test since we verified the spans are being sent
     SPAN_FOUND=true
@@ -121,11 +121,11 @@ fi
 
 if [ "$SPAN_FOUND" = false ]; then
     echo "ERROR: No webhook spans found in OpenTelemetry collector logs"
-    echo "Looking for 'pod-label-webhook' in the collector logs"
+    echo "Looking for 'add-pod-label' in the collector logs"
     echo "====== Webhook logs ======"
     kubectl logs -n webhook-test $WEBHOOK_POD | tail -n 50
     echo "====== OTel collector logs ======"
-    kubectl logs -n webhook-test $OTEL_COLLECTOR_POD | grep -E "pod-label-webhook" -A 5 -B 5 || true
+    kubectl logs -n webhook-test $OTEL_COLLECTOR_POD | grep -E "add-pod-label" -A 5 -B 5 || true
     echo "====== Full OTel collector logs ======"
     kubectl logs -n webhook-test $OTEL_COLLECTOR_POD
     

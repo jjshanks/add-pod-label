@@ -61,4 +61,4 @@ verify: lint-all test
 
 # Format Go code using goimports
 fmt:
-	goimports -local github.com/jjshanks/pod-label-webhook -w .
+	goimports -local github.com/jjshanks/add-pod-label -w .

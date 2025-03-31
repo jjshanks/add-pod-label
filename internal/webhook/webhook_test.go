@@ -17,7 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/jjshanks/pod-label-webhook/internal/config"
+	"github.com/jjshanks/add-pod-label/internal/config"
 )
 
 // TestServer is a helper struct for testing

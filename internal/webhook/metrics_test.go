@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jjshanks/pod-label-webhook/internal/config"
+	"github.com/jjshanks/add-pod-label/internal/config"
 )
 
 // Helper function to safely extract float value from a metric
@@ -202,7 +202,7 @@ func TestMetricsMiddlewareEdgeCases(t *testing.T) {
 
 				// Find the duration histogram metric
 				for _, mf := range metricFamilies {
-					if mf.GetName() == "pod_label_webhook_request_duration_seconds" {
+					if mf.GetName() == "add_pod_label_request_duration_seconds" {
 						foundDurationMetric = true
 						// Look through histogram buckets
 						for _, m := range mf.GetMetric() {
@@ -365,14 +365,14 @@ func TestMetricsEndpoint(t *testing.T) {
 			setupMetrics: func(m *metrics) {
 				m.requestCounter.WithLabelValues("/test", "GET", "200").Inc()
 			},
-			expectedMetric: `pod_label_webhook_requests_total{method="GET",path="/test",status="200"} 1`,
+			expectedMetric: `add_pod_label_requests_total{method="GET",path="/test",status="200"} 1`,
 		},
 		{
 			name: "health metrics",
 			setupMetrics: func(m *metrics) {
 				m.updateHealthMetrics(true, true)
 			},
-			expectedMetric: `pod_label_webhook_readiness_status 1`,
+			expectedMetric: `add_pod_label_readiness_status 1`,
 		},
 	}
 
@@ -468,7 +468,7 @@ func TestIntegrationWithServer(t *testing.T) {
 			method:     "POST",
 			body:       "{}",
 			wantStatus: http.StatusBadRequest, // Because the body isn't valid admission review
-			wantMetric: `pod_label_webhook_requests_total{method="POST",path="/mutate",status="400"} 1`,
+			wantMetric: `add_pod_label_requests_total{method="POST",path="/mutate",status="400"} 1`,
 			checkError: true,
 		},
 		{
@@ -476,7 +476,7 @@ func TestIntegrationWithServer(t *testing.T) {
 			endpoint:   "/healthz",
 			method:     "GET",
 			wantStatus: http.StatusOK,
-			wantMetric: `pod_label_webhook_requests_total{method="GET",path="/healthz",status="200"} 1`,
+			wantMetric: `add_pod_label_requests_total{method="GET",path="/healthz",status="200"} 1`,
 		},
 	}
 
@@ -520,7 +520,7 @@ func TestIntegrationWithServer(t *testing.T) {
 			assert.Contains(t, string(metricsBody), tt.wantMetric)
 
 			if tt.checkError && w.Code >= 400 {
-				assert.Contains(t, string(metricsBody), `pod_label_webhook_errors_total`)
+				assert.Contains(t, string(metricsBody), `add_pod_label_errors_total`)
 			}
 		})
 	}
@@ -542,7 +542,7 @@ func TestMetricRecording(t *testing.T) {
 		// Label operation test cases
 		{
 			name:       "successful label operation",
-			metricName: "pod_label_webhook_label_operations_total",
+			metricName: "add_pod_label_label_operations_total",
 			operation:  labelOperationSuccess,
 			namespace:  "default",
 			recorded:   true,
@@ -553,7 +553,7 @@ func TestMetricRecording(t *testing.T) {
 		},
 		{
 			name:       "skipped label operation",
-			metricName: "pod_label_webhook_label_operations_total",
+			metricName: "add_pod_label_label_operations_total",
 			operation:  labelOperationSkipped,
 			namespace:  "test-ns",
 			recorded:   true,
@@ -564,7 +564,7 @@ func TestMetricRecording(t *testing.T) {
 		},
 		{
 			name:       "error label operation",
-			metricName: "pod_label_webhook_label_operations_total",
+			metricName: "add_pod_label_label_operations_total",
 			operation:  labelOperationError,
 			namespace:  "error-ns",
 			recorded:   true,
@@ -576,7 +576,7 @@ func TestMetricRecording(t *testing.T) {
 		// Annotation validation test cases
 		{
 			name:       "valid annotation",
-			metricName: "pod_label_webhook_annotation_validation_total",
+			metricName: "add_pod_label_annotation_validation_total",
 			operation:  annotationValid,
 			namespace:  "default",
 			recorded:   true,
@@ -587,7 +587,7 @@ func TestMetricRecording(t *testing.T) {
 		},
 		{
 			name:       "invalid annotation",
-			metricName: "pod_label_webhook_annotation_validation_total",
+			metricName: "add_pod_label_annotation_validation_total",
 			operation:  annotationInvalid,
 			namespace:  "test-ns",
 			recorded:   true,
@@ -598,7 +598,7 @@ func TestMetricRecording(t *testing.T) {
 		},
 		{
 			name:       "missing annotation",
-			metricName: "pod_label_webhook_annotation_validation_total",
+			metricName: "add_pod_label_annotation_validation_total",
 			operation:  annotationMissing,
 			namespace:  "missing-ns",
 			recorded:   true,
