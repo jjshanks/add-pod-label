@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: webhook
-          image: ghcr.io/jjshanks/add-pod-label:latest
+          image: ghcr.io/jjshanks/pod-label-webhook:latest
           imagePullPolicy: IfNotPresent
           args:
             - "--cert-file=/tls/tls.crt"
