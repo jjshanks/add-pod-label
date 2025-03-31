@@ -5,6 +5,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // tracingMiddleware wraps an HTTP handler to add tracing.
@@ -31,11 +32,19 @@ func (s *Server) tracingMiddleware(next http.Handler) http.Handler {
 		ctx = propagator.Extract(ctx, propagation.HeaderCarrier(r.Header))
 
 		// Start a new span for this request
-		ctx, span := s.tracer.startSpan(ctx, "http_request",
+		var span trace.Span
+		var err error
+		ctx, span, err = s.tracer.startSpan(ctx, "http_request",
 			"http.method", r.Method,
 			"http.url", r.URL.String(),
 			"http.path", r.URL.Path,
 		)
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to create span, continuing without tracing")
+			// Continue without tracing
+			next.ServeHTTP(w, r)
+			return
+		}
 		defer span.End()
 
 		// Add request ID to span if available

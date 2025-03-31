@@ -213,10 +213,15 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 	// Start a span for this handler (child of the middleware's span)
 	if s.tracer.enabled {
 		var span trace.Span
-		ctx, span = s.tracer.startSpan(ctx, "handle_mutate", 
+		var err error
+		ctx, span, err = s.tracer.startSpan(ctx, "handle_mutate", 
 			"request_id", reqID,
 		)
-		defer span.End()
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to create span for handle_mutate")
+		} else {
+			defer span.End()
+		}
 	}
 	
 	// Read the entire request body
@@ -239,8 +244,13 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 	// Start a span for decoding operation
 	var decodeSpan trace.Span
 	if s.tracer.enabled {
-		_, decodeSpan = s.tracer.startSpan(ctx, "decode_admission_review")
-		defer decodeSpan.End()
+		var err error
+		_, decodeSpan, err = s.tracer.startSpan(ctx, "decode_admission_review")
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to create span for decode_admission_review")
+		} else {
+			defer decodeSpan.End()
+		}
 	}
 	
 	// Decode the admission review
@@ -283,8 +293,13 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 	// Start a span for pod unmarshaling
 	var podSpan trace.Span
 	if s.tracer.enabled {
-		_, podSpan = s.tracer.startSpan(ctx, "unmarshal_pod")
-		defer podSpan.End()
+		var err error
+		_, podSpan, err = s.tracer.startSpan(ctx, "unmarshal_pod")
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to create span for unmarshal_pod")
+		} else {
+			defer podSpan.End()
+		}
 	}
 	
 	// Unmarshal the pod from the request
@@ -312,11 +327,16 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 	// Start span for creating patch
 	var patchSpan trace.Span
 	if s.tracer.enabled {
-		_, patchSpan = s.tracer.startSpan(ctx, "create_patch",
+		var err error
+		_, patchSpan, err = s.tracer.startSpan(ctx, "create_patch",
 			"pod.name", pod.Name,
 			"pod.namespace", pod.Namespace,
 		)
-		defer patchSpan.End()
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to create span for create_patch")
+		} else {
+			defer patchSpan.End()
+		}
 	}
 	
 	// Create label patch
@@ -340,8 +360,13 @@ func (s *Server) handleMutate(w http.ResponseWriter, r *http.Request) {
 	// Start span for preparing response
 	var respSpan trace.Span
 	if s.tracer.enabled {
-		_, respSpan = s.tracer.startSpan(ctx, "prepare_response")
-		defer respSpan.End()
+		var err error
+		_, respSpan, err = s.tracer.startSpan(ctx, "prepare_response")
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to create span for prepare_response")
+		} else {
+			defer respSpan.End()
+		}
 	}
 	
 	// Prepare admission review response

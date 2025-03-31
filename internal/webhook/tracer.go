@@ -148,23 +148,27 @@ func (t *tracer) shutdown(ctx context.Context) error {
 // Returns:
 //   - New context containing the span
 //   - The created span
-func (t *tracer) startSpan(ctx context.Context, operationName string, keyValues ...string) (context.Context, trace.Span) {
+//   - error if any issues occurred (e.g., odd number of key-value pairs)
+func (t *tracer) startSpan(ctx context.Context, operationName string, keyValues ...string) (context.Context, trace.Span, error) {
 	if !t.enabled {
 		// Return a no-op span when tracing is disabled
-		return ctx, trace.SpanFromContext(ctx)
+		return ctx, trace.SpanFromContext(ctx), nil
 	}
 
 	// Check for even number of key-value pairs
 	if len(keyValues)%2 != 0 {
+		err := fmt.Errorf("odd number of key-value pairs provided for span attributes in operation '%s'", operationName)
 		log.Warn().
 			Str("operation", operationName).
 			Int("attributes_count", len(keyValues)).
-			Msg("Odd number of key-value pairs for span attributes")
+			Err(err).
+			Msg("Invalid span attributes")
+		return ctx, nil, err
 	}
 
 	// Create attributes from key-value pairs
 	var attrs []attribute.KeyValue
-	for i := 0; i < len(keyValues)-1; i += 2 {
+	for i := 0; i < len(keyValues); i += 2 {
 		key := keyValues[i]
 		value := keyValues[i+1]
 		attrs = append(attrs, attribute.String(key, value))
@@ -172,5 +176,6 @@ func (t *tracer) startSpan(ctx context.Context, operationName string, keyValues 
 
 	// Start span with attributes
 	tr := otel.Tracer(tracerName)
-	return tr.Start(ctx, operationName, trace.WithAttributes(attrs...))
+	ctx, span := tr.Start(ctx, operationName, trace.WithAttributes(attrs...))
+	return ctx, span, nil
 }

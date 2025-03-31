@@ -63,28 +63,32 @@ func TestTracerInitialization(t *testing.T) {
 
 func TestTracerStartSpan(t *testing.T) {
 	tests := []struct {
-		name       string
-		enabled    bool
-		attributes []string
+		name        string
+		enabled     bool
+		attributes  []string
 		expectAttrs int
+		expectError bool
 	}{
 		{
-			name:       "span with enabled tracing",
-			enabled:    true,
-			attributes: []string{"key1", "value1", "key2", "value2"},
+			name:        "span with enabled tracing",
+			enabled:     true,
+			attributes:  []string{"key1", "value1", "key2", "value2"},
 			expectAttrs: 2,
+			expectError: false,
 		},
 		{
-			name:       "span with disabled tracing",
-			enabled:    false,
-			attributes: []string{"key1", "value1"},
+			name:        "span with disabled tracing",
+			enabled:     false,
+			attributes:  []string{"key1", "value1"},
 			expectAttrs: 0,
+			expectError: false,
 		},
 		{
-			name:       "span with odd number of attributes",
-			enabled:    true,
-			attributes: []string{"key1", "value1", "orphan"},
-			expectAttrs: 1,
+			name:        "span with odd number of attributes",
+			enabled:     true,
+			attributes:  []string{"key1", "value1", "orphan"},
+			expectAttrs: 0, // No attributes should be set due to error
+			expectError: true,
 		},
 	}
 
@@ -113,9 +117,23 @@ func TestTracerStartSpan(t *testing.T) {
 			}()
 			
 			ctx := context.Background()
-			spanCtx, span := tracer.startSpan(ctx, "test-operation", tt.attributes...)
-			assert.NotNil(t, spanCtx)
-			assert.NotNil(t, span)
+			spanCtx, span, err := tracer.startSpan(ctx, "test-operation", tt.attributes...)
+			
+			if tt.expectError {
+				assert.Error(t, err, "Expected an error for odd number of attributes")
+				assert.Equal(t, ctx, spanCtx, "Context should be unchanged on error")
+				assert.Nil(t, span, "Span should be nil on error")
+				return
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, spanCtx)
+				assert.NotNil(t, span)
+			}
+			
+			// Skip span operations if we expected an error
+			if span == nil {
+				return
+			}
 			
 			// End span to flush it to the recorder
 			span.End()
