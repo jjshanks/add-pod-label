@@ -67,11 +67,19 @@ func initTracer(ctx context.Context, serviceNamespace, serviceName, serviceVersi
 		clientOpts = append(clientOpts, otlptracegrpc.WithInsecure())
 	}
 
-	// Create exporter
-	exporter, err := otlptrace.New(ctx, otlptracegrpc.NewClient(clientOpts...))
+	// Create exporter with more detailed logging
+	log.Info().
+		Str("endpoint", endpoint).
+		Bool("insecure", insecure).
+		Msg("Creating OTLP trace exporter")
+	
+	client := otlptracegrpc.NewClient(clientOpts...)
+	exporter, err := otlptrace.New(ctx, client)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP trace exporter: %w", err)
 	}
+	
+	log.Info().Msg("OTLP trace exporter created successfully")
 
 	// Create resource with service information
 	res, err := resource.New(ctx,

@@ -74,13 +74,16 @@ data:
     exporters:
       logging:
         loglevel: debug
+        verbosity: detailed
+      debug:
+        verbosity: detailed
 
     service:
       pipelines:
         traces:
           receivers: [otlp]
           processors: [batch]
-          exporters: [logging]
+          exporters: [logging, debug]
 ---
 apiVersion: v1
 kind: Service
