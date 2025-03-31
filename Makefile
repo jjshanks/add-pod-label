@@ -1,4 +1,4 @@
-.PHONY: all build test clean build deploy undeploy lint lint-yaml lint-all verify fuzz fmt test-integration-trace
+.PHONY: all build test clean build deploy undeploy lint lint-yaml lint-all verify fuzz fmt test-integration test-integration-trace test-integration-all
 
 # Default target
 all: build
@@ -18,6 +18,9 @@ test-integration:
 	$(MAKE) build && \
 	./test/integration/kind-deploy.sh && \
 	./test/integration/integ-test.sh
+	
+# Run all integration tests (both standard and tracing)
+test-integration-all: test-integration test-integration-trace
 
 # Run integration tests with tracing enabled
 test-integration-trace:
