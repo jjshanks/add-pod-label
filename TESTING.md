@@ -54,6 +54,8 @@ The tracing integration tests verify OpenTelemetry tracing functionality:
 4. Verify traces are collected by the OpenTelemetry collector
 5. Validate span attributes and parent-child relationships
 
+**Note:** When using tracing in your own environment, deploy an OpenTelemetry collector alongside the webhook. For detailed setup instructions, refer to the OpenTelemetry Collector documentation at https://opentelemetry.io/docs/collector/.
+
 #### Tracing Flow Architecture
 
 ```
@@ -137,7 +139,7 @@ The following spans are verified in the trace tests:
 
 - **Handler Spans** (children):
   - **Admission Review**: Processing the admission request
-    - **Decode/Unmarshal**: Parsing admission review JSON
+    - **Decoding/Unmarshalling**: Parsing admission review JSON
     - **Authorization**: Checking permissions (if enabled)
     - **Patch Creation**: Generating the JSON patch
       - **Label Operations**: Individual label modifications
