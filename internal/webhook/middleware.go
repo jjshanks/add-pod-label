@@ -43,6 +43,18 @@ func (s *Server) tracingMiddleware(next http.Handler) http.Handler {
 		if reqID != "" {
 			span.SetAttributes(attribute.String("request.id", reqID))
 		}
+		
+		// Add label context information to span if available
+		podName, namespace, prefix := GetPodInfoFromContext(ctx)
+		if podName != "" {
+			span.SetAttributes(attribute.String("pod.name", podName))
+		}
+		if namespace != "" {
+			span.SetAttributes(attribute.String("pod.namespace", namespace))
+		}
+		if prefix != "" {
+			span.SetAttributes(attribute.String("label.prefix", prefix))
+		}
 
 		// Wrap response writer to capture status code
 		wrapped := newStatusRecorder(w)

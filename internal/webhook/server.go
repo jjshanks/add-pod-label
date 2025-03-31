@@ -150,11 +150,11 @@ func (s *Server) Run() error {
 	// Set up HTTP routes
 	mux := http.NewServeMux()
 
-	// Create middleware chain - tracing first, then metrics
-	// This ensures spans are created before metrics are collected
+	// Create middleware chain - label extraction first, then tracing, then metrics
+	// This ensures contextual data flows through the entire chain
 	handleWithMiddleware := func(handler http.HandlerFunc) http.Handler {
-		// First apply tracing, then metrics
-		return s.tracingMiddleware(s.metrics.metricsMiddleware(handler))
+		// First extract labels, then apply tracing, then metrics
+		return s.labelMiddleware(s.tracingMiddleware(s.metrics.metricsMiddleware(handler)))
 	}
 
 	// Apply middleware chain to handlers

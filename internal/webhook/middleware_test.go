@@ -168,10 +168,10 @@ func TestMiddlewareChaining(t *testing.T) {
 	})
 	
 	// Create middleware chain
-	handler := server.tracingMiddleware(server.metrics.metricsMiddleware(testHandler))
+	handler := server.labelMiddleware(server.tracingMiddleware(server.metrics.metricsMiddleware(testHandler)))
 	
-	// Create and serve request
-	req := httptest.NewRequest("GET", "/test", nil)
+	// Create and serve request with label information
+	req := httptest.NewRequest("GET", "/test?pod=test-pod&namespace=test-ns&prefix=app.io/", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	
@@ -181,6 +181,22 @@ func TestMiddlewareChaining(t *testing.T) {
 	// Verify trace was created
 	spans := sr.Ended()
 	assert.Len(t, spans, 1)
+	
+	// Verify span has pod attributes
+	if len(spans) > 0 {
+		span := spans[0]
+		attrs := span.Attributes()
+		attrMap := make(map[string]string)
+		for _, attr := range attrs {
+			if attr.Value.AsString() != "" {
+				attrMap[string(attr.Key)] = attr.Value.AsString()
+			}
+		}
+		
+		assert.Equal(t, "test-pod", attrMap["pod.name"], "Span should contain pod name")
+		assert.Equal(t, "test-ns", attrMap["pod.namespace"], "Span should contain namespace")
+		assert.Equal(t, "app.io/", attrMap["label.prefix"], "Span should contain label prefix")
+	}
 	
 	// Verify metrics were recorded
 	counter, err := metrics.requestCounter.GetMetricWith(map[string]string{
