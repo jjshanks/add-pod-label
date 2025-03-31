@@ -345,7 +345,7 @@ func NewTestServer(cfg *config.Config, reg prometheus.Registerer) (*Server, erro
 	// Create base logger with common fields
 	logger := zerolog.New(os.Stdout).With().
 		Timestamp().
-		Str("service", "pod-label-webhook").
+		Str("service", "add-pod-label").
 		Logger()
 
 	// Configure log level

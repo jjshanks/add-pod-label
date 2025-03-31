@@ -65,7 +65,7 @@ func New() *Config {
 		TracingEndpoint:     "",
 		TracingInsecure:     false,
 		ServiceNamespace:    "default",
-		ServiceName:         "pod-label-webhook",
+		ServiceName:         "add-pod-label",
 		ServiceVersion:      "dev",
 	}
 }

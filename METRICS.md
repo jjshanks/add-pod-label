@@ -1,23 +1,23 @@
 # Metrics
 
-The pod-label-webhook exposes Prometheus metrics on the `/metrics` endpoint. This document describes the available metrics and how to use them.
+The add-pod-label exposes Prometheus metrics on the `/metrics` endpoint. This document describes the available metrics and how to use them.
 
 ## Available Metrics
 
 ### Request Metrics
 
-| Metric Name                                  | Type      | Description                        | Labels                     |
-| -------------------------------------------- | --------- | ---------------------------------- | -------------------------- |
-| `pod_label_webhook_requests_total`           | Counter   | Total number of requests processed | `path`, `method`, `status` |
-| `pod_label_webhook_request_duration_seconds` | Histogram | Request duration in seconds        | `path`, `method`           |
-| `pod_label_webhook_errors_total`             | Counter   | Total number of errors encountered | `path`, `method`, `status` |
+| Metric Name                              | Type      | Description                        | Labels                     |
+| ---------------------------------------- | --------- | ---------------------------------- | -------------------------- |
+| `add_pod_label_requests_total`           | Counter   | Total number of requests processed | `path`, `method`, `status` |
+| `add_pod_label_request_duration_seconds` | Histogram | Request duration in seconds        | `path`, `method`           |
+| `add_pod_label_errors_total`             | Counter   | Total number of errors encountered | `path`, `method`, `status` |
 
 ### Health Metrics
 
-| Metric Name                          | Type  | Description                                             | Labels |
-| ------------------------------------ | ----- | ------------------------------------------------------- | ------ |
-| `pod_label_webhook_readiness_status` | Gauge | Current readiness status (1 for ready, 0 for not ready) | None   |
-| `pod_label_webhook_liveness_status`  | Gauge | Current liveness status (1 for alive, 0 for not alive)  | None   |
+| Metric Name                      | Type  | Description                                             | Labels |
+| -------------------------------- | ----- | ------------------------------------------------------- | ------ |
+| `add_pod_label_readiness_status` | Gauge | Current readiness status (1 for ready, 0 for not ready) | None   |
+| `add_pod_label_liveness_status`  | Gauge | Current liveness status (1 for alive, 0 for not alive)  | None   |
 
 ## Labels
 
@@ -68,10 +68,10 @@ spec:
   subject:
     organizations:
       - webhook-system
-  commonName: pod-label-webhook-metrics
+  commonName: add-pod-label-metrics
   dnsNames:
-    - pod-label-webhook.webhook-test.svc
-    - pod-label-webhook.webhook-test.svc.cluster.local
+    - add-pod-label.webhook-test.svc
+    - add-pod-label.webhook-test.svc.cluster.local
   issuerRef:
     name: webhook-selfsigned-issuer
     kind: Issuer
@@ -83,12 +83,12 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: pod-label-webhook
+  name: add-pod-label
   namespace: webhook-test
 spec:
   selector:
     matchLabels:
-      app: pod-label-webhook
+      app: add-pod-label
   namespaceSelector:
     matchNames:
       - webhook-test
@@ -118,65 +118,65 @@ spec:
 
 ```promql
 # Request rate over the last 5 minutes
-rate(pod_label_webhook_requests_total[5m])
+rate(add_pod_label_requests_total[5m])
 
 # Error rate over the last 5 minutes
-rate(pod_label_webhook_errors_total[5m])
+rate(add_pod_label_errors_total[5m])
 ```
 
 ### Latency
 
 ```promql
 # 95th percentile latency over the last hour
-histogram_quantile(0.95, sum(rate(pod_label_webhook_request_duration_seconds_bucket[1h])) by (le))
+histogram_quantile(0.95, sum(rate(add_pod_label_request_duration_seconds_bucket[1h])) by (le))
 
 # Average request duration
-rate(pod_label_webhook_request_duration_seconds_sum[5m]) /
-rate(pod_label_webhook_request_duration_seconds_count[5m])
+rate(add_pod_label_request_duration_seconds_sum[5m]) /
+rate(add_pod_label_request_duration_seconds_count[5m])
 ```
 
 ### Health Status
 
 ```promql
 # Current readiness status
-pod_label_webhook_readiness_status
+add_pod_label_readiness_status
 
 # Current liveness status
-pod_label_webhook_liveness_status
+add_pod_label_liveness_status
 ```
 
 ## Example Alerts
 
 ```yaml
 groups:
-  - name: pod-label-webhook
+  - name: add-pod-label
     rules:
       - alert: HighErrorRate
         expr: |
-          sum(rate(pod_label_webhook_errors_total[5m])) /
-          sum(rate(pod_label_webhook_requests_total[5m])) > 0.1
+          sum(rate(add_pod_label_errors_total[5m])) /
+          sum(rate(add_pod_label_requests_total[5m])) > 0.1
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: High error rate in pod-label-webhook
+          summary: High error rate in add-pod-label
           description: Error rate is above 10% for the last 5 minutes
 
       - alert: HighLatency
         expr: |
           histogram_quantile(0.95,
-            sum(rate(pod_label_webhook_request_duration_seconds_bucket[5m]))
+            sum(rate(add_pod_label_request_duration_seconds_bucket[5m]))
             by (le)
           ) > 1
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: High latency in pod-label-webhook
+          summary: High latency in add-pod-label
           description: 95th percentile latency is above 1 second for the last 5 minutes
 
       - alert: WebhookNotReady
-        expr: pod_label_webhook_readiness_status == 0
+        expr: add_pod_label_readiness_status == 0
         for: 5m
         labels:
           severity: critical
@@ -187,7 +187,7 @@ groups:
 
 ## Example Grafana Dashboard
 
-The Grafana dashboard JSON can be found in [dashboards/pod-label-webhook.json](dashboards/pod-label-webhook.json).
+The Grafana dashboard JSON can be found in [dashboards/add-pod-label.json](dashboards/add-pod-label.json).
 
 1. Request Rate gauge
 2. Request Duration (P95) time series

@@ -1,4 +1,4 @@
-# Pod Label Webhook
+# Add Pod Label
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/jjshanks/add-pod-label)](https://goreportcard.com/report/github.com/jjshanks/add-pod-label)
 [![Go](https://github.com/jjshanks/add-pod-label/workflows/Go/badge.svg)](https://github.com/jjshanks/add-pod-label/actions?query=workflow%3AGo)
@@ -27,7 +27,7 @@ This webhook intercepts pod creation requests in Kubernetes and adds a "hello: w
 By default, the webhook adds a "hello: world" label to all pods. This behavior can be controlled using the following annotation:
 
 ```yaml
-pod-label-webhook.jjshanks.github.com/add-hello-world: "false"
+add-pod-label.jjshanks.github.com/add-hello-world: "false"
 ```
 
 Example deployment with labeling disabled:
@@ -41,7 +41,7 @@ spec:
   template:
     metadata:
       annotations:
-        pod-label-webhook.jjshanks.github.com/add-hello-world: "false"
+        add-pod-label.jjshanks.github.com/add-hello-world: "false"
     spec:
       containers:
         - name: nginx

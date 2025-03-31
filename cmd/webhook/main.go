@@ -1,4 +1,4 @@
-// Package main implements the pod-label-webhook server, which adds labels to Kubernetes pods
+// Package main implements the add-pod-label server, which adds labels to Kubernetes pods
 // via a mutating admission webhook.
 //
 // The webhook server supports configuration through environment variables, command line flags,
@@ -78,7 +78,7 @@ func init() {
 	rootCmd.Flags().String("tracing-endpoint", "", "OpenTelemetry collector endpoint (e.g., otel-collector:4317)")
 	rootCmd.Flags().Bool("tracing-insecure", false, "Use insecure connection to the collector")
 	rootCmd.Flags().String("service-namespace", "default", "Namespace of the service for resource attribution")
-	rootCmd.Flags().String("service-name", "pod-label-webhook", "Name of the service for resource attribution")
+	rootCmd.Flags().String("service-name", "add-pod-label", "Name of the service for resource attribution")
 	rootCmd.Flags().String("service-version", "dev", "Version of the service for resource attribution")
 }
 
