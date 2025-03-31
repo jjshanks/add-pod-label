@@ -88,22 +88,32 @@ cleanup() {
     # Kill port forwarding if it exists
     if [ -n "${PORT_FORWARD_PID:-}" ]; then
         echo "Stopping webhook port forwarding process..."
-        kill $PORT_FORWARD_PID || true
+        kill $PORT_FORWARD_PID 2>/dev/null || true
         wait $PORT_FORWARD_PID 2>/dev/null || true
     fi
     
     # Kill otel port forwarding if it exists
     if [ -n "${OTEL_PORT_FORWARD_PID:-}" ]; then
         echo "Stopping OpenTelemetry collector port forwarding process..."
-        kill $OTEL_PORT_FORWARD_PID || true
+        kill $OTEL_PORT_FORWARD_PID 2>/dev/null || true
         wait $OTEL_PORT_FORWARD_PID 2>/dev/null || true
     fi
     
-    # Delete test resources
-    echo "Deleting test deployments..."
-    kubectl delete -f test/e2e/manifests/test-deployment.yaml --ignore-not-found
-    kubectl delete -f test/e2e/manifests/test-deployment-trace.yaml --ignore-not-found
-    
-    # Delete additional test pods if they exist
-    kubectl delete pod trace-test-pod --ignore-not-found --wait=false
+    # Check if we're in an error state - if we are, don't clean up everything yet
+    if [ -z "${SKIP_RESOURCE_CLEANUP:-}" ]; then
+        # Delete test resources
+        echo "Deleting test deployments..."
+        kubectl delete -f test/e2e/manifests/test-deployment.yaml --ignore-not-found
+        
+        # Delete additional test pods if they exist
+        kubectl delete pod trace-test-pod --ignore-not-found --wait=false
+        kubectl delete pod trace-test-pod2 --ignore-not-found --wait=false
+        
+        # Only delete trace deployment if explicitly asked
+        if [ -z "${PRESERVE_TRACING:-}" ]; then
+            kubectl delete -f test/e2e/manifests/test-deployment-trace.yaml --ignore-not-found
+        fi
+    else
+        echo "Skipping full resource cleanup due to error state"
+    fi
 }
