@@ -35,6 +35,7 @@ jobs:
         uses: golangci/golangci-lint-action@8564da7cb3c6866ed1da648ca8f00a258ef0c802 # v6.5.2
         with:
           version: latest
+          install-mode: goinstall
           args: --timeout=5m --fix
           only-new-issues: true
           working-directory: .
