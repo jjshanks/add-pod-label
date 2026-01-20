@@ -5,7 +5,7 @@ COPY . .
 RUN go mod download
 RUN CGO_ENABLED=0 GOOS=linux go build -o webhook ./cmd/webhook
 
-FROM alpine:3.22
+FROM alpine:3.23
 WORKDIR /
 COPY --from=builder /app/webhook /webhook
 ENTRYPOINT ["/webhook"]
