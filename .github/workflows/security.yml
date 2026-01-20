@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8   # v6.0.1
         with:
           fetch-depth: 0
 
@@ -34,14 +34,14 @@ jobs:
           args: '-no-fail -fmt sarif -out scan-results/gosec.sarif ./...'
 
       - name: Upload Gosec results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: scan-results/gosec.sarif
           category: GosecScan
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435   # v3.11.1
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f   # v3.12.0
 
       - name: Build image for scanning
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
@@ -72,21 +72,21 @@ jobs:
           timeout: '10m'
 
       - name: Upload Trivy filesystem results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: scan-results/trivy-fs.sarif
           category: TrivyFSScan
 
       - name: Upload Trivy image results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: scan-results/trivy-image.sarif
           category: TrivyImageScan
 
       - name: Run container scan
-        uses: anchore/scan-action@a5605eb0943e46279cb4fbd9d44297355d3520ab   # v7.0.2
+        uses: anchore/scan-action@62b74fb7bb810d2c45b1865f47a77655621862a5   # v7.2.3
         id: scan
         if: always()
         with:
@@ -96,7 +96,7 @@ jobs:
           output-format: "sarif"
 
       - name: Upload Anchore scan results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
