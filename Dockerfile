@@ -5,7 +5,8 @@ COPY . .
 RUN go mod download
 RUN CGO_ENABLED=0 GOOS=linux go build -o webhook ./cmd/webhook
 
-FROM alpine:3.23
+FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /app/webhook /webhook
+USER nonroot:nonroot
 ENTRYPOINT ["/webhook"]
